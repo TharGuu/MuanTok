@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-import 'home_screen.dart'; // Import the new home screen
+import 'main_navigation.dart';
 
 // 1. Converted to StatefulWidget
 class SignUpScreen extends StatefulWidget {
@@ -26,12 +25,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
   Future<void> _signUp() async {
     // Check if passwords match
     if (_passwordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Passwords do not match"),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Passwords do not match"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
@@ -51,7 +52,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       // If sign up is successful, navigate to home
       if (res.user != null && context.mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          // 2. NAVIGATE TO MainNavigation
+          MaterialPageRoute(builder: (context) => const MainNavigation()),
               (route) => false,
         );
       }
@@ -75,9 +77,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
     }
 
-    setState(() {
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   // 4. Dispose controllers
@@ -138,13 +142,19 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         ),
                         const SizedBox(height: 30),
 
-                        _buildTextField(_fullNameController, 'Full Name', 'Your full name'),
+                        _buildTextField(
+                            _fullNameController, 'Full Name', 'Your full name'),
                         const SizedBox(height: 20),
-                        _buildTextField(_emailController, 'Email Address', 'your@example.com'),
+                        _buildTextField(_emailController, 'Email Address',
+                            'your@example.com'),
                         const SizedBox(height: 20),
-                        _buildTextField(_passwordController, 'Password', '********', isPassword: true),
+                        _buildTextField(
+                            _passwordController, 'Password', '********',
+                            isPassword: true),
                         const SizedBox(height: 20),
-                        _buildTextField(_confirmPasswordController, 'Confirm Password', '********', isPassword: true),
+                        _buildTextField(_confirmPasswordController,
+                            'Confirm Password', '********',
+                            isPassword: true),
                         const SizedBox(height: 30),
 
                         // Sign Up Button
@@ -162,11 +172,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(color: Colors.black54),
+                            child: CircularProgressIndicator(
+                                color: Colors.black54),
                           )
                               : const Text(
                             'Sign Up',
-                            style: TextStyle(fontSize: 18, color: Colors.black87),
+                            style: TextStyle(
+                                fontSize: 18, color: Colors.black87),
                           ),
                         ),
                       ],
@@ -201,7 +213,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   // Reusable Text Field
-  Widget _buildTextField(TextEditingController controller, String label, String hint, {bool isPassword = false}) {
+  Widget _buildTextField(
+      TextEditingController controller, String label, String hint,
+      {bool isPassword = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -226,7 +240,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,
             ),
-            contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+            contentPadding:
+            const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
             suffixIcon: isPassword
                 ? const Icon(Icons.visibility_off_outlined, color: Colors.grey)
                 : null,

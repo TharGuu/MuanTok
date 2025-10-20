@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'home_screen.dart';
+import 'main_navigation.dart'; // <-- 1. IMPORT MainNavigation instead of HomeScreen
 import 'signup_screen.dart';
 
-
-// 1. Converted to StatefulWidget
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
 
@@ -16,11 +14,9 @@ class _SignInScreenState extends State<SignInScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  // 2. Add loading state and supabase client
   bool _isLoading = false;
   final _supabase = Supabase.instance.client;
 
-  // 3. Create the sign-in function
   Future<void> _signIn() async {
     setState(() {
       _isLoading = true;
@@ -35,7 +31,8 @@ class _SignInScreenState extends State<SignInScreen> {
       // If sign in is successful, navigate to home
       if (res.user != null && context.mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          // 2. NAVIGATE TO MainNavigation
+          MaterialPageRoute(builder: (context) => const MainNavigation()),
               (route) => false,
         );
       }
@@ -59,12 +56,13 @@ class _SignInScreenState extends State<SignInScreen> {
       }
     }
 
-    setState(() {
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
-  // 4. Dispose controllers
   @override
   void dispose() {
     _emailController.dispose();
