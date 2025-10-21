@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../services/supabase_service.dart'; // ensure this file exists
+import '../services/supabase_service.dart';
 
 class ShopScreen extends StatefulWidget {
   const ShopScreen({super.key});
@@ -18,15 +18,14 @@ class _ShopScreenState extends State<ShopScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final safeArea = MediaQuery.of(context).padding;
+    final safe = MediaQuery.of(context).padding;
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // --- 1) Main Content
           Positioned.fill(
-            top: safeArea.top + 64,
+            top: safe.top + 64,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
               child: selectedTab == 'Buy'
@@ -37,12 +36,18 @@ class _ShopScreenState extends State<ShopScreen> {
                   try {
                     final userId = SupabaseService.requireUserId();
 
-                    final imageUrl = await SupabaseService.uploadProductImage(
-                      bytes: product.imageBytes,
-                      fileName: product.imageName,
+                    // Build batch uploads
+                    final toUpload = product.images
+                        .map((e) => ImageToUpload(bytes: e.bytes, fileName: e.name))
+                        .toList();
+
+                    // Upload all images
+                    final urls = await SupabaseService.uploadProductImages(
+                      images: toUpload,
                       userId: userId,
                     );
 
+                    // Insert product with multiple image URLs
                     final inserted = await SupabaseService.insertProduct(
                       sellerId: userId,
                       name: product.name,
@@ -50,16 +55,16 @@ class _ShopScreenState extends State<ShopScreen> {
                       category: product.category,
                       price: product.price,
                       stock: product.stock,
-                      imageUrl: imageUrl,
+                      imageUrls: urls,
                     );
 
-                    if (mounted) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('✅ ${inserted['name']} listed successfully!')),
+                        SnackBar(content: Text('✅ ${inserted['name']} listed!')),
                       );
                     }
                   } catch (e) {
-                    if (mounted) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('❌ $e')),
                       );
@@ -70,15 +75,14 @@ class _ShopScreenState extends State<ShopScreen> {
             ),
           ),
 
-          // --- 2) Top Bar (Buy/Sell, Search, Profile) — same capsule style
+          // Top bar (Buy/Sell toggle + Search + Profile)
           Positioned(
-            top: safeArea.top + 10,
+            top: safe.top + 10,
             left: 16,
             right: 16,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Capsule toggle (dark translucent like home_screen)
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.3),
@@ -99,15 +103,11 @@ class _ShopScreenState extends State<ShopScreen> {
                     ],
                   ),
                 ),
-
                 Row(
                   children: [
                     const Icon(Icons.search, color: Colors.white, size: 30, shadows: [Shadow(blurRadius: 2)]),
                     const SizedBox(width: 16),
-                    CircleAvatar(
-                      radius: 15,
-                      backgroundColor: Colors.grey.shade400,
-                    ),
+                    CircleAvatar(radius: 15, backgroundColor: Colors.grey.shade400),
                   ],
                 ),
               ],
@@ -149,19 +149,22 @@ class _BuyPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Center(
-      child: Text(
-        '🛒 Browse Items to Buy',
-        style: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.w600),
-      ),
+      child: Text('🛒 Browse Items to Buy',
+          style: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.w600)),
     );
   }
 }
 
-/* -------------------------------- SELL FORM -------------------------------- */
+/* ------------------------------- SELL FORM -------------------------------- */
+
+class PickedImage {
+  final Uint8List bytes;
+  final String name; // keep extension for MIME
+  PickedImage(this.bytes, this.name);
+}
 
 class ProductInput {
-  final Uint8List imageBytes;
-  final String imageName;
+  final List<PickedImage> images;
   final String name;
   final String description;
   final String category;
@@ -169,8 +172,7 @@ class ProductInput {
   final int stock;
 
   ProductInput({
-    required this.imageBytes,
-    required this.imageName,
+    required this.images,
     required this.name,
     required this.description,
     required this.category,
@@ -197,19 +199,14 @@ class _SellFormState extends State<SellForm> {
   final _stockCtrl = TextEditingController(text: '1');
 
   final _picker = ImagePicker();
-  Uint8List? _imageBytes;
-  String? _imageName;
+  final List<PickedImage> _images = [];
 
   String? _category;
   final _categories = const [
     'Electronics',
     'Fashion',
     'Beauty',
-    'Home & Living',
-    'Toys & Hobbies',
     'Sports',
-    'Automotive',
-    'Pets',
     'Other',
   ];
 
@@ -224,61 +221,50 @@ class _SellFormState extends State<SellForm> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _addFromGallery() async {
     try {
-      final src = await showModalBottomSheet<ImageSource>(
-        context: context,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        builder: (context) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text('Gallery'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_camera),
-                title: const Text('Camera'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      );
-      if (src == null) return;
-
-      // image_picker handles runtime permission prompts when needed.
-      final picked = await _picker.pickImage(
-        source: src,
-        imageQuality: 85,
-        maxWidth: 2000,
-      );
-      if (picked == null) return;
-
-      final bytes = await picked.readAsBytes();
-      if (bytes.isEmpty) {
-        throw StateError('Picked image is empty.');
+      final files = await _picker.pickMultiImage(imageQuality: 85, maxWidth: 2000);
+      if (files.isEmpty) return;
+      for (final f in files) {
+        final bytes = await f.readAsBytes();
+        if (bytes.isEmpty) continue;
+        _images.add(PickedImage(bytes, f.name));
       }
-
-      setState(() {
-        _imageBytes = bytes;
-        _imageName = picked.name; // keep extension for correct MIME
-      });
+      setState(() {});
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Image pick failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gallery pick failed: $e')));
     }
   }
 
+  Future<void> _addFromCamera() async {
+    try {
+      final f = await _picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 2000);
+      if (f == null) return;
+      final bytes = await f.readAsBytes();
+      if (bytes.isEmpty) return;
+      setState(() => _images.add(PickedImage(bytes, f.name)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Camera failed: $e')));
+    }
+  }
+
+  void _removeAt(int index) {
+    setState(() => _images.removeAt(index));
+  }
+
+  void _openFullScreen(int startIndex) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FullscreenGallery(images: _images, initialIndex: startIndex),
+      ),
+    );
+  }
+
   Future<void> _submit() async {
-    if (_imageBytes == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please upload a product photo.')));
+    if (_images.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please add product photos.')));
       return;
     }
     if (_formKey.currentState?.validate() != true) return;
@@ -287,8 +273,7 @@ class _SellFormState extends State<SellForm> {
     final stock = int.tryParse(_stockCtrl.text.trim()) ?? 0;
 
     final product = ProductInput(
-      imageBytes: _imageBytes!,
-      imageName: _imageName ?? 'product_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      images: List.unmodifiable(_images),
       name: _nameCtrl.text.trim(),
       description: _descCtrl.text.trim(),
       category: _category ?? 'Other',
@@ -301,10 +286,9 @@ class _SellFormState extends State<SellForm> {
       await widget.onSubmit(product);
 
       if (!mounted) return;
-      // Reset form after success
+      // reset form
       setState(() {
-        _imageBytes = null;
-        _imageName = null;
+        _images.clear();
         _nameCtrl.clear();
         _descCtrl.clear();
         _priceCtrl.clear();
@@ -326,46 +310,68 @@ class _SellFormState extends State<SellForm> {
           key: _formKey,
           child: Column(
             children: [
-              // Image picker
-              GestureDetector(
-                onTap: _pickImage,
-                child: Container(
-                  height: 180,
-                  width: double.infinity,
+              // Photos header + add buttons
+              Row(
+                children: [
+                  const Text('Photos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: _addFromGallery,
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('Gallery'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: _addFromCamera,
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    label: const Text('Camera'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Grid of thumbnails (tap to view full, long-press to remove)
+              if (_images.isEmpty)
+                Container(
+                  height: 160,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.grey.shade300),
                   ),
-                  child: _imageBytes == null
-                      ? Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_a_photo_outlined, color: Colors.grey.shade700, size: 36),
-                      const SizedBox(height: 8),
-                      Text('Upload product photo', style: TextStyle(color: Colors.grey.shade700)),
-                    ],
-                  )
-                      : ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.memory(
-                      _imageBytes!,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                    ),
+                  child: Text('Add multiple photos', style: TextStyle(color: Colors.grey.shade700)),
+                )
+              else
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _images.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3, mainAxisSpacing: 8, crossAxisSpacing: 8,
                   ),
+                  itemBuilder: (context, i) {
+                    final p = _images[i];
+                    return GestureDetector(
+                      onTap: () => _openFullScreen(i),
+                      onLongPress: () => _removeAt(i),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.memory(p.bytes, fit: BoxFit.cover),
+                      ),
+                    );
+                  },
                 ),
-              ),
+
               const SizedBox(height: 16),
 
+              // Form fields
               _LightInput(
                 controller: _nameCtrl,
                 label: 'Product name',
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Product name is required' : null,
               ),
               const SizedBox(height: 12),
-
               _LightInput(
                 controller: _descCtrl,
                 label: 'Description',
@@ -392,9 +398,7 @@ class _SellFormState extends State<SellForm> {
                       label: 'Price',
                       prefixText: '฿ ',
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
                       validator: (v) {
                         final val = double.tryParse((v ?? '').trim());
                         if (val == null) return 'Enter a number';
@@ -409,9 +413,7 @@ class _SellFormState extends State<SellForm> {
                       controller: _stockCtrl,
                       label: 'Stock',
                       keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       validator: (v) {
                         final val = int.tryParse((v ?? '').trim());
                         if (val == null) return 'Enter stock';
@@ -442,6 +444,52 @@ class _SellFormState extends State<SellForm> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ----------------------------- Fullscreen viewer ---------------------------- */
+
+class FullscreenGallery extends StatefulWidget {
+  final List<PickedImage> images;
+  final int initialIndex;
+
+  const FullscreenGallery({super.key, required this.images, this.initialIndex = 0});
+
+  @override
+  State<FullscreenGallery> createState() => _FullscreenGalleryState();
+}
+
+class _FullscreenGalleryState extends State<FullscreenGallery> {
+  late final PageController _ctrl = PageController(initialPage: widget.initialIndex);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _ctrl,
+              itemCount: widget.images.length,
+              itemBuilder: (_, i) => InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4,
+                child: Center(child: Image.memory(widget.images[i].bytes, fit: BoxFit.contain)),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              left: 8,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -536,10 +584,7 @@ class _LightDropdown extends FormField<String> {
             value: state.value,
             isExpanded: true,
             items: items
-                .map((e) => DropdownMenuItem<String>(
-              value: e,
-              child: Text(e),
-            ))
+                .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
                 .toList(),
             onChanged: (val) {
               state.didChange(val);

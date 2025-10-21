@@ -5,8 +5,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Configure names used across your app.
 class _Config {
-  static const String storageBucket = 'products'; // your Storage bucket name
-  static const String productsTable = 'products'; // your DB table name
+  static const String storageBucket = 'products';  // Storage bucket name
+  static const String productsTable = 'products';  // DB table name
+  // If your table doesn't have created_at, change to 'id'
+  static const String defaultOrderBy = 'created_at';
+}
+
+/// A simple DTO for batch uploads.
+class ImageToUpload {
+  final Uint8List bytes;
+  final String fileName; // keep extension for proper MIME
+  ImageToUpload({required this.bytes, required this.fileName});
 }
 
 String _mimeFromName(String name) {
@@ -16,6 +25,10 @@ String _mimeFromName(String name) {
   if (n.endsWith('.heic')) return 'image/heic';
   if (n.endsWith('.jpeg') || n.endsWith('.jpg')) return 'image/jpeg';
   return 'application/octet-stream';
+}
+
+String _objectPath({required String userId, required String fileName}) {
+  return 'users/$userId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
 }
 
 class SupabaseService {
@@ -32,37 +45,33 @@ class SupabaseService {
     return uid;
   }
 
-  /// Uploads product image bytes to Storage and returns a **public URL**.
-  ///
-  /// Make sure your Storage bucket is set to **Public** (or switch to signed URLs).
+  /* ---------------------------------------------------------------------- */
+  /*                               UPLOADS                                  */
+  /* ---------------------------------------------------------------------- */
+
+  /// Upload a single image and return its public URL (for Public bucket)
   static Future<String> uploadProductImage({
     required Uint8List bytes,
     required String fileName,
     required String userId,
   }) async {
-    final path = 'users/$userId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
+    final path = _objectPath(userId: userId, fileName: fileName);
     final contentType = _mimeFromName(fileName);
 
     try {
       await _client.storage.from(_Config.storageBucket).uploadBinary(
         path,
         bytes,
-        fileOptions: FileOptions(
-          contentType: contentType,
-          upsert: false,
-        ),
+        fileOptions: FileOptions(contentType: contentType, upsert: false),
       );
-
       // Public bucket → return public URL
       final url = _client.storage.from(_Config.storageBucket).getPublicUrl(path);
-      debugPrint('Uploaded to storage: $path → $url');
+      debugPrint('Uploaded: $path → $url');
       return url;
 
-      // If your bucket is PRIVATE, use this instead:
-      // final signedUrl = await _client.storage
-      //     .from(_Config.storageBucket)
-      //     .createSignedUrl(path, 60 * 60);
-      // return signedUrl;
+      // If bucket is PRIVATE, use signed URLs instead:
+      // final signed = await _client.storage.from(_Config.storageBucket).createSignedUrl(path, 3600);
+      // return signed;
     } on StorageException catch (e, st) {
       debugPrint('Storage upload failed: ${e.message}\n$st');
       throw StateError('Upload failed: ${e.message}');
@@ -72,9 +81,28 @@ class SupabaseService {
     }
   }
 
-  /// Inserts a product row and returns the inserted row (map).
-  ///
-  /// Schema fields: seller_id, name, description, category, price, stock, image_url
+  /// Upload **multiple** images and return their URLs in order.
+  static Future<List<String>> uploadProductImages({
+    required List<ImageToUpload> images,
+    required String userId,
+  }) async {
+    final urls = <String>[];
+    for (final img in images) {
+      final url = await uploadProductImage(
+        bytes: img.bytes,
+        fileName: img.fileName,
+        userId: userId,
+      );
+      urls.add(url);
+    }
+    return urls;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /*                                INSERTS                                 */
+  /* ---------------------------------------------------------------------- */
+
+  /// Insert a product with **multiple** image URLs into `image_urls` (text[]).
   static Future<Map<String, dynamic>> insertProduct({
     required String sellerId,
     required String name,
@@ -82,25 +110,26 @@ class SupabaseService {
     required String category,
     required double price,
     required int stock,
-    required String imageUrl,
+    required List<String> imageUrls, // <-- multiple
   }) async {
     try {
-      final rows = await _client
-          .from(_Config.productsTable)
-          .insert({
+      final payload = {
         'seller_id': sellerId,
         'name': name,
         'description': description,
         'category': category,
         'price': price,
         'stock': stock,
-        'image_url': imageUrl,
-      })
+        'image_urls': imageUrls, // <-- array column in DB
+      };
+      debugPrint('Insert payload keys: ${payload.keys.toList()}');
+
+      final rows = await _client
+          .from(_Config.productsTable)
+          .insert(payload)
           .select()
           .limit(1);
-      final row = rows.first as Map<String, dynamic>;
-      debugPrint('Inserted product: $row');
-      return row;
+      return rows.first as Map<String, dynamic>;
     } on PostgrestException catch (e, st) {
       debugPrint('Insert failed: ${e.message}\n$st');
       throw StateError('Insert failed: ${e.message}');
@@ -110,22 +139,42 @@ class SupabaseService {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Optional helpers (nice for your Buy tab or admin tools)
-  // ---------------------------------------------------------------------------
+  /// Convenience: insert with a **single** image URL (wraps into a list).
+  static Future<Map<String, dynamic>> insertProductSingle({
+    required String sellerId,
+    required String name,
+    required String description,
+    required String category,
+    required double price,
+    required int stock,
+    required String imageUrl, // single
+  }) {
+    return insertProduct(
+      sellerId: sellerId,
+      name: name,
+      description: description,
+      category: category,
+      price: price,
+      stock: stock,
+      imageUrls: [imageUrl], // wrap
+    );
+  }
 
-  /// Returns latest products (public browse).
+  /* ---------------------------------------------------------------------- */
+  /*                               QUERIES                                  */
+  /* ---------------------------------------------------------------------- */
+
+  /// Browse products (optionally filter by category).
   static Future<List<Map<String, dynamic>>> listProducts({
     int limit = 20,
     int offset = 0,
-    String? category, // filter by category if provided
-    String orderBy = 'created_at',
+    String? category,
+    String orderBy = _Config.defaultOrderBy,
     bool ascending = false,
   }) async {
     try {
       final table = _client.from(_Config.productsTable);
 
-      // Build query in branches to avoid assigning different builder types.
       List<dynamic> rows;
       if (category != null && category.isNotEmpty) {
         rows = await table
@@ -150,11 +199,11 @@ class SupabaseService {
     }
   }
 
-  /// Deletes a product by id.
-  /// (If you also want to delete the image from Storage, store the object path separately.)
-  static Future<void> deleteProduct({
-    required String productId,
-  }) async {
+  /* ---------------------------------------------------------------------- */
+  /*                                 DELETE                                  */
+  /* ---------------------------------------------------------------------- */
+
+  static Future<void> deleteProduct({required String productId}) async {
     try {
       await _client.from(_Config.productsTable).delete().eq('id', productId);
     } on PostgrestException catch (e, st) {
