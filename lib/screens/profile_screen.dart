@@ -1,71 +1,135 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/user_profile.dart'; // Using your UserProfile model
-import '../services/profile_service.dart'; // Using your ProfileService
+import '../models/user_profile.dart';
+import '../services/profile_service.dart';
 import 'edit_profile_screen.dart';
-import 'main_navigation.dart'; // For navigation after logout
+import 'main_navigation.dart';
 
-// Converted to a StatefulWidget for refresh capabilities
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  /// If null -> current user's profile. If set -> view another user's profile.
+  final String? userId;
+  const ProfileScreen({super.key, this.userId});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // Keep a single instance of the service
   final ProfileService _profileService = ProfileService();
-  // Using the purple color defined in your signin/signup screens
   final Color primaryPurple = const Color(0xFF673ab7);
+  final _supabase = Supabase.instance.client;
 
-  // Future to hold the state for the FutureBuilder
   late Future<UserProfile> _userProfileFuture;
+
+  bool _isSelf = true;
+  bool _isFollowing = false;
+  String get _viewerId => _supabase.auth.currentUser?.id ?? '';
+  String get _targetId => widget.userId ?? _viewerId;
 
   @override
   void initState() {
     super.initState();
-    // Fetch the data when the widget is first created
+    _isSelf = (widget.userId == null) || (widget.userId == _viewerId);
     _userProfileFuture = _fetchData();
+    if (!_isSelf && _viewerId.isNotEmpty) {
+      _checkFollowing();
+    }
   }
 
-  // Centralized data fetching method
-  Future<UserProfile> _fetchData() {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) {
-      // If user is not logged in, return a future with an error
+  Future<UserProfile> _fetchData() async {
+    if (_targetId.isEmpty) {
       return Future.error('User is not authenticated.');
     }
-    // Call the service to get the profile data
-    return _profileService.fetchUserProfile(userId);
+    // If your ProfileService can fetch by id, call that; otherwise add a method.
+    return _profileService.fetchUserProfile(_targetId);
   }
 
-  // Method to manually refresh the data (for pull-to-refresh)
   Future<void> _refreshProfile() async {
-    setState(() {
-      // Create a new future to trigger the FutureBuilder to rebuild
-      _userProfileFuture = _fetchData();
-    });
-  }
-
-  // Helper to format large numbers (e.g., 25800 -> 25.8K)
-  String _formatCount(int count) {
-    if (count >= 1000000) {
-      return '${(count / 1000000).toStringAsFixed(1)}M';
-    } else if (count >= 1000) {
-      final String formatted = (count / 1000).toStringAsFixed(1);
-      return formatted.endsWith('.0') ? '${formatted.substring(0, formatted.length - 2)}K' : '${formatted}K';
-    } else {
-      return count.toString();
+    setState(() => _userProfileFuture = _fetchData());
+    if (!_isSelf && _viewerId.isNotEmpty) {
+      await _checkFollowing();
     }
   }
 
-  // Helper to show a snackbar for actions
-  void _showSnackbar(BuildContext context, String message) {
-    if (context.mounted) {
+  // ——— Follow state helpers ———
+  Future<void> _checkFollowing() async {
+    try {
+      final rel = await _supabase
+          .from('connections')
+          .select('id')
+          .eq('follower_id', _viewerId)
+          .eq('following_id', _targetId)
+          .limit(1);
+      if (!mounted) return;
+      setState(() => _isFollowing = (rel is List && rel.isNotEmpty));
+    } catch (_) {
+      // ignore for MVP
+    }
+  }
+
+  Future<void> _toggleFollow(UserProfile user) async {
+    if (_viewerId.isEmpty || _isSelf) return;
+
+    try {
+      if (_isFollowing) {
+        // Unfollow
+        await _supabase
+            .from('connections')
+            .delete()
+            .match({'follower_id': _viewerId, 'following_id': _targetId});
+
+        if (!mounted) return;
+        setState(() => _isFollowing = false);
+
+        // Pull fresh counts from DB
+        await _refreshProfile();
+      } else {
+        // Follow
+        await _supabase.from('connections').insert({
+          'follower_id': _viewerId,
+          'following_id': _targetId,
+        });
+
+        if (!mounted) return;
+        setState(() => _isFollowing = true);
+
+        // Pull fresh counts from DB
+        await _refreshProfile();
+      }
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        SnackBar(content: Text('Action failed: $e')),
       );
+    }
+  }
+
+  // ——— UI helpers ———
+  String _formatCount(int count) {
+    if (count >= 1000000) return '${(count / 1000000).toStringAsFixed(1)}M';
+    if (count >= 1000) {
+      final s = (count / 1000).toStringAsFixed(1);
+      return s.endsWith('.0') ? '${s.substring(0, s.length - 2)}K' : '${s}K';
+    }
+    return count.toString();
+  }
+
+  void _showSnackbar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await _supabase.auth.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const MainNavigation()),
+            (_) => false,
+      );
+      _showSnackbar('You have been logged out.');
+    } catch (e) {
+      _showSnackbar('Sign out failed: $e');
     }
   }
 
@@ -73,24 +137,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Profile', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: Text(_isSelf ? 'My Profile' : 'Profile',
+            style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.white,
         elevation: 0,
         toolbarHeight: 50,
+        actions: [
+          if (_isSelf)
+            IconButton(
+              tooltip: 'Log out',
+              icon: const Icon(Icons.logout, color: Colors.black87),
+              onPressed: _signOut,
+            ),
+        ],
       ),
-      // The body now uses the stateful future
       body: FutureBuilder<UserProfile>(
         future: _userProfileFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(primaryPurple)));
+            return Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(primaryPurple),
+              ),
+            );
           }
           if (snapshot.hasError) {
-            return Center(child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Text('Error: ${snapshot.error}', textAlign: TextAlign.center),
-            ));
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Text('Error: ${snapshot.error}', textAlign: TextAlign.center),
+              ),
+            );
           }
           if (!snapshot.hasData) {
             return const Center(child: Text('No profile data found.'));
@@ -98,22 +176,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           final user = snapshot.data!;
 
-          // Using RefreshIndicator for pull-to-refresh
           return RefreshIndicator(
             onRefresh: _refreshProfile,
             color: primaryPurple,
-            child: ListView( // Changed from SingleChildScrollView to ListView for RefreshIndicator
+            child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               children: [
-                // --- TOP PROFILE CARD AREA ---
+                // TOP
                 Center(
                   child: Column(
                     children: [
-                      const SizedBox(height: 16), // Add some top padding
+                      const SizedBox(height: 16),
                       CircleAvatar(
                         radius: 50,
                         backgroundColor: Colors.grey.shade200,
-                        backgroundImage: user.avatarUrl != null && user.avatarUrl!.isNotEmpty
+                        backgroundImage: (user.avatarUrl != null && user.avatarUrl!.isNotEmpty)
                             ? NetworkImage(user.avatarUrl!)
                             : null,
                         child: (user.avatarUrl == null || user.avatarUrl!.isEmpty)
@@ -126,94 +203,110 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
                       ),
                       Text(
-                        '@${user.fullName?.replaceAll(' ', '').toLowerCase() ?? 'userhandle'}',
+                        '@${(user.fullName ?? 'user').replaceAll(' ', '').toLowerCase()}',
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
                       ),
                       const SizedBox(height: 10),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20.0),
                         child: Text(
-                          user.bio ?? 'No bio set. Please edit your profile.',
+                          user.bio ?? 'No bio set.',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      OutlinedButton(
-                        onPressed: () async {
-                          // Navigate to EditProfileScreen and wait for a result
-                          final bool? profileWasUpdated = await Navigator.push<bool>(
-                            context,
-                            MaterialPageRoute(builder: (context) => EditProfileScreen(initialProfile: user)),
-                          );
-                          // If the profile was updated, refresh the data
-                          if (profileWasUpdated == true) {
-                            _refreshProfile();
-                          }
-                        },
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 45),
-                          side: const BorderSide(color: Colors.grey),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      const SizedBox(height: 16),
+
+                      // If viewing someone else → Follow/Unfollow button
+                      if (!_isSelf)
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () => _toggleFollow(user),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isFollowing ? Colors.grey.shade300 : primaryPurple,
+                              minimumSize: const Size(double.infinity, 45),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            child: Text(
+                              _isFollowing ? 'Following' : 'Follow',
+                              style: TextStyle(
+                                color: _isFollowing ? Colors.black87 : Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
                         ),
-                        child: const Text('Edit Profile', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                      ),
-                      const SizedBox(height: 10),
-                      ElevatedButton(
-                        onPressed: () => _showSnackbar(context, 'Sell Products clicked'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryPurple,
-                          minimumSize: const Size(double.infinity, 45),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+
+                      // If self → Edit + My Products
+                      if (_isSelf) ...[
+                        OutlinedButton(
+                          onPressed: () async {
+                            final bool? updated = await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(builder: (_) => EditProfileScreen(initialProfile: user)),
+                            );
+                            if (updated == true) _refreshProfile();
+                          },
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 45),
+                            side: const BorderSide(color: Colors.grey),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          child: const Text('Edit Profile',
+                              style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                         ),
-                        child: const Text('My Products', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
+                        const SizedBox(height: 10),
+                        ElevatedButton(
+                          onPressed: () => _showSnackbar('My Products clicked'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryPurple,
+                            minimumSize: const Size(double.infinity, 45),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          child: const Text('My Products',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
                     ],
                   ),
                 ),
                 const SizedBox(height: 30),
 
-                // --- SOCIAL CONNECTIONS ---
+                // SOCIAL
                 _SectionHeader(title: 'Social Connections'),
                 _ConnectionTile(
                   title: 'Following',
                   count: user.followingCount,
                   formatCount: _formatCount,
-                  onTap: () => _showSnackbar(context, 'Go to Following list'),
+                  onTap: () => _showSnackbar('Go to Following list'),
                 ),
                 _ConnectionTile(
                   title: 'Followers',
                   count: user.followersCount,
                   formatCount: _formatCount,
-                  onTap: () => _showSnackbar(context, 'Go to Followers list'),
+                  onTap: () => _showSnackbar('Go to Followers list'),
                 ),
                 const SizedBox(height: 20),
 
-                // --- ACCOUNT ACTIONS ---
-                _SectionHeader(title: 'Account Actions'),
-                _ActionTile(
-                  title: 'Voucher',
-                  icon: Icons.card_giftcard_outlined,
-                  onTap: () => _showSnackbar(context, 'Voucher clicked'),
-                  color: primaryPurple,
-                ),
-                _ActionTile(
-                  title: 'Log Out',
-                  icon: Icons.logout,
-                  isDestructive: true,
-                  onTap: () async {
-                    await Supabase.instance.client.auth.signOut();
-                    if (context.mounted) {
-                      Navigator.of(context).pushAndRemoveUntil(
-                        MaterialPageRoute(builder: (context) => const MainNavigation()),
-                            (route) => false,
-                      );
-                      _showSnackbar(context, 'You have been logged out.');
-                    }
-                  },
-                  color: Colors.red,
-                ),
-                const SizedBox(height: 20), // Add padding at the bottom
+                // ACCOUNT (only for self)
+                if (_isSelf) ...[
+                  _SectionHeader(title: 'Account Actions'),
+                  _ActionTile(
+                    title: 'Voucher',
+                    icon: Icons.card_giftcard_outlined,
+                    onTap: () => _showSnackbar('Voucher clicked'),
+                    color: primaryPurple,
+                  ),
+                  _ActionTile(
+                    title: 'Log Out',
+                    icon: Icons.logout,
+                    isDestructive: true,
+                    onTap: _signOut,
+                    color: Colors.red,
+                  ),
+                  const SizedBox(height: 20),
+                ],
               ],
             ),
           );
@@ -223,26 +316,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
-
-// These helper widgets remain unchanged as they are already well-structured.
+// Helpers you already had:
 class _SectionHeader extends StatelessWidget {
   final String title;
   const _SectionHeader({required this.title});
-
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10.0, bottom: 8.0),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: Colors.black87,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 10.0, bottom: 8.0),
+    child: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+  );
 }
 
 class _ConnectionTile extends StatelessWidget {
@@ -250,31 +332,18 @@ class _ConnectionTile extends StatelessWidget {
   final int count;
   final String Function(int) formatCount;
   final VoidCallback onTap;
-
-  const _ConnectionTile({
-    required this.title,
-    required this.count,
-    required this.formatCount,
-    required this.onTap,
-  });
-
+  const _ConnectionTile({required this.title, required this.count, required this.formatCount, required this.onTap});
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding: EdgeInsets.zero, // Match design better
+      contentPadding: EdgeInsets.zero,
       leading: Icon(Icons.person_outline, color: Colors.grey.shade700),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            formatCount(count),
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          const SizedBox(width: 4),
-          const Icon(Icons.chevron_right, color: Colors.grey),
-        ],
-      ),
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(formatCount(count), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(width: 4),
+        const Icon(Icons.chevron_right, color: Colors.grey),
+      ]),
       onTap: onTap,
     );
   }
@@ -286,19 +355,11 @@ class _ActionTile extends StatelessWidget {
   final VoidCallback onTap;
   final bool isDestructive;
   final Color color;
-
-  const _ActionTile({
-    required this.title,
-    required this.icon,
-    required this.onTap,
-    required this.color,
-    this.isDestructive = false,
-  });
-
+  const _ActionTile({required this.title, required this.icon, required this.onTap, required this.color, this.isDestructive = false});
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding: EdgeInsets.zero, // Match design better
+      contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: color),
       title: Text(title, style: TextStyle(color: color, fontWeight: FontWeight.w500)),
       trailing: const Icon(Icons.chevron_right, color: Colors.grey),

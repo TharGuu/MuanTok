@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'search_screen.dart';
+import 'profile_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -8,7 +10,7 @@ class HomeScreen extends StatelessWidget {
     // PageView for vertical scrolling like TikTok
     return PageView.builder(
       scrollDirection: Axis.vertical,
-      itemCount: 5, // Let's create 5 dummy pages
+      itemCount: 5, // demo pages
       itemBuilder: (context, index) {
         return _buildVideoPage(context); // Build the video page UI
       },
@@ -17,16 +19,14 @@ class HomeScreen extends StatelessWidget {
 
   // This widget builds the UI for a single video page
   Widget _buildVideoPage(BuildContext context) {
-    // Get screen size for safe area adjustments
     final safeArea = MediaQuery.of(context).padding;
 
     return Stack(
       fit: StackFit.expand,
       children: [
         // --- 1. The Blank Video Area ---
-        // This is the placeholder you asked for
         Container(
-          color: Colors.grey[300], // Placeholder background
+          color: Colors.grey[300],
           child: const Center(
             child: Text(
               'Live Stream Placeholder',
@@ -37,13 +37,13 @@ class HomeScreen extends StatelessWidget {
 
         // --- 2. Top Bar (Public/Friend, Search, Profile) ---
         Positioned(
-          top: safeArea.top + 10, // Position below status bar
+          top: safeArea.top + 10,
           left: 16,
           right: 16,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Public/Friend Toggle
+              // Public/Friend Toggle (static for now)
               Container(
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.3),
@@ -57,11 +57,13 @@ class HomeScreen extends StatelessWidget {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text('Public', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      child: const Text('Public',
+                          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: const Text('Friend', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      child: const Text('Friend',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -69,12 +71,27 @@ class HomeScreen extends StatelessWidget {
               // Icons
               Row(
                 children: [
-                  const Icon(Icons.search, color: Colors.white, size: 30, shadows: [Shadow(blurRadius: 2)]),
-                  const SizedBox(width: 16),
-                  CircleAvatar(
-                    radius: 15,
-                    backgroundColor: Colors.grey,
-                    // You would use a NetworkImage here
+                  // SEARCH → open SearchScreen
+                  IconButton(
+                    icon: const Icon(Icons.search, color: Colors.white, size: 30, shadows: [Shadow(blurRadius: 2)]),
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SearchScreen()),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  // AVATAR → open current user's ProfileScreen
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                      );
+                    },
+                    child: const CircleAvatar(
+                      radius: 15,
+                      backgroundColor: Colors.grey,
+                    ),
                   ),
                 ],
               ),
@@ -103,7 +120,7 @@ class HomeScreen extends StatelessWidget {
         Positioned(
           bottom: 20,
           left: 16,
-          right: 80, // Give space for the side bar
+          right: 80,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -138,10 +155,10 @@ class HomeScreen extends StatelessWidget {
                   const Text(
                     '@LilyDreamer',
                     style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        shadows: [Shadow(blurRadius: 2)]
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      shadows: [Shadow(blurRadius: 2)],
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -164,7 +181,6 @@ class HomeScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              // Description
               const Text(
                 'Embracing the lilac skies... #LilacDreamer #PastelLife',
                 style: TextStyle(color: Colors.white, fontSize: 14, shadows: [Shadow(blurRadius: 1)]),
@@ -182,11 +198,16 @@ class HomeScreen extends StatelessWidget {
   Widget _buildSideBarIcon(IconData icon, String label) {
     return Column(
       children: [
-        Icon(icon, color: Colors.white, size: 35, shadows: [Shadow(blurRadius: 2)]),
+        Icon(icon, color: Colors.white, size: 35, shadows: const [Shadow(blurRadius: 2)]),
         const SizedBox(height: 4),
         Text(
           label,
-          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600, shadows: [Shadow(blurRadius: 1)]),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            shadows: [Shadow(blurRadius: 1)],
+          ),
         ),
       ],
     );
