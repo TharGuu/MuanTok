@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/supabase_service.dart';
+import '../features/profile/voucher_screen.dart';
 
 /* -------------------------------------------------------------------------- */
 /*                               CATEGORY MODEL                               */
@@ -26,7 +27,26 @@ const _categories = <_Category>[
   _Category('Fashion',     'Fashion',     Icons.checkroom_rounded),
   _Category('Sport',       'Sport',       Icons.sports_soccer_rounded),
   _Category('Food',        'Food',        Icons.fastfood_rounded),
+  _Category('Other',       'Other',       Icons.category_rounded),
 ];
+
+/* -------------------------------------------------------------------------- */
+/*                               PRICE HELPERS                                */
+/* -------------------------------------------------------------------------- */
+
+String _fmtBaht(num value) {
+  final s = value.toStringAsFixed(2);
+  return s.endsWith('00') ? value.toStringAsFixed(0) : s;
+}
+
+num _parseNum(dynamic v) {
+  if (v is num) return v;
+  if (v is String) {
+    final d = double.tryParse(v);
+    if (d != null) return d;
+  }
+  return 0;
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                 SHOP SCREEN                                */
@@ -41,6 +61,55 @@ class ShopScreen extends StatefulWidget {
 class _ShopScreenState extends State<ShopScreen> {
   String selectedTab = 'Buy'; // Buy | Sell
 
+  void _openSearch(BuildContext context) {
+    showSearch(context: context, delegate: ProductSearchDelegate());
+  }
+
+  Future<void> _handlePublish(ProductInput product) async {
+    try {
+      final userId = SupabaseService.requireUserId();
+
+      // 1) Upload images
+      final toUpload = product.images
+          .map((e) => ImageToUpload(bytes: e.bytes, fileName: e.name))
+          .toList();
+
+      final urls = await SupabaseService.uploadProductImages(
+        images: toUpload,
+        userId: userId,
+      );
+
+      // 2) Insert product
+      final sb = Supabase.instance.client;
+      final rows = await sb.from('products').insert({
+        'seller_id': userId, // <-- keep this
+        'name': product.name,
+        'description': product.description,
+        'category': product.category,
+        'price': product.price,
+        'stock': product.stock,
+        'image_urls': urls,
+        // optional extras you already had:
+        'is_event': product.isEvent,
+        'discount_percent': product.discountPercent,
+      }).select().limit(1);
+
+      final inserted = (rows as List).isNotEmpty ? rows.first : null;
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('✅ ${inserted?['name'] ?? product.name} listed!')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final safe = MediaQuery.of(context).padding;
@@ -49,7 +118,6 @@ class _ShopScreenState extends State<ShopScreen> {
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // Content
           Positioned.fill(
             top: safe.top + 64,
             child: AnimatedSwitcher(
@@ -58,47 +126,12 @@ class _ShopScreenState extends State<ShopScreen> {
                   ? const _BuyHome()
                   : SellForm(
                 key: const ValueKey('sell-form'),
-                onSubmit: (product) async {
-                  try {
-                    final userId = SupabaseService.requireUserId();
-
-                    final toUpload = product.images
-                        .map((e) => ImageToUpload(bytes: e.bytes, fileName: e.name))
-                        .toList();
-
-                    final urls = await SupabaseService.uploadProductImages(
-                      images: toUpload,
-                      userId: userId,
-                    );
-
-                    final inserted = await SupabaseService.insertProduct(
-                      sellerId: userId,
-                      name: product.name,
-                      description: product.description,
-                      category: product.category,
-                      price: product.price,
-                      stock: product.stock,
-                      imageUrls: urls,
-                    );
-
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('✅ ${inserted['name']} listed!')),
-                      );
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('❌ $e')),
-                      );
-                    }
-                  }
-                },
+                onSubmit: _handlePublish,
               ),
             ),
           ),
 
-          // Top bar (Buy/Sell toggle + Search + Profile)
+          // Top bar (Buy/Sell toggle + Search only on Buy)
           Positioned(
             top: safe.top + 10,
             left: 16,
@@ -128,8 +161,13 @@ class _ShopScreenState extends State<ShopScreen> {
                 ),
                 Row(
                   children: [
-                    const Icon(Icons.search, color: Colors.white, size: 30, shadows: [Shadow(blurRadius: 2)]),
-                    const SizedBox(width: 16),
+                    if (selectedTab == 'Buy')
+                      GestureDetector(
+                        onTap: () => _openSearch(context),
+                        child: const Icon(Icons.search,
+                            color: Colors.white, size: 30, shadows: [Shadow(blurRadius: 2)]),
+                      ),
+                    if (selectedTab == 'Buy') const SizedBox(width: 16),
                     CircleAvatar(radius: 15, backgroundColor: Colors.grey.shade400),
                   ],
                 ),
@@ -172,7 +210,6 @@ class _ShopScreenState extends State<ShopScreen> {
 
 class _BuyHome extends StatefulWidget {
   const _BuyHome();
-
   @override
   State<_BuyHome> createState() => _BuyHomeState();
 }
@@ -182,13 +219,19 @@ class _BuyHomeState extends State<_BuyHome> {
   String? _error;
   List<Map<String, dynamic>> _recommended = [];
 
-  // Coupons (local state; persist in DB per-user if you want)
+  // Demo coupons (seeded in UI; persisted when claimed)
   final List<_Coupon> _coupons = [
     _Coupon('c1', '฿50 OFF', 'Min. spend ฿300'),
     _Coupon('c2', 'Free Ship', 'Nationwide'),
     _Coupon('c3', '10% OFF', 'Cap ฿100'),
     _Coupon('c4', 'Buy 1 Get 1', 'Selected items'),
   ];
+
+  /// IDs already claimed by the signed-in user (fetched from DB)
+  final Set<String> _claimedIds = <String>{};
+
+  List<_Coupon> get _visibleCoupons =>
+      _coupons.where((c) => !_claimedIds.contains(c.id)).toList();
 
   RealtimeChannel? _channel;
   StreamSubscription<void>? _debounce;
@@ -198,6 +241,7 @@ class _BuyHomeState extends State<_BuyHome> {
     super.initState();
     _fetchRecommended();
     _subscribeRealtime();
+    _loadClaimedCouponIds();
   }
 
   @override
@@ -207,17 +251,42 @@ class _BuyHomeState extends State<_BuyHome> {
     super.dispose();
   }
 
+  Future<void> _loadClaimedCouponIds() async {
+    try {
+      final sb = Supabase.instance.client;
+      final uid = sb.auth.currentUser?.id;
+      if (uid == null || uid.isEmpty) return;
+
+      final rows = await sb
+          .from('user_coupons')
+          .select('coupon_id')
+          .eq('user_id', uid);
+
+      final ids = <String>{};
+      for (final r in (rows as List)) {
+        final v = r['coupon_id'];
+        if (v != null) ids.add(v.toString());
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _claimedIds
+          ..clear()
+          ..addAll(ids);
+      });
+    } catch (_) {}
+  }
+
   Future<void> _fetchRecommended() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      // latest 6 from Supabase products
       final list = await SupabaseService.listProducts(
         limit: 6,
         offset: 0,
-        orderBy: 'created_at',
+        orderBy: 'id',
         ascending: false,
       );
       setState(() => _recommended = list);
@@ -255,33 +324,122 @@ class _BuyHomeState extends State<_BuyHome> {
 
   void _scheduleRefresh() {
     _debounce?.cancel();
-    _debounce = Stream<void>.periodic(const Duration(milliseconds: 250)).take(1).listen((_) {
-      if (mounted) _fetchRecommended();
-    });
+    _debounce =
+        Stream<void>.periodic(const Duration(milliseconds: 250)).take(1).listen((_) {
+          if (mounted) _fetchRecommended();
+        });
   }
 
   void _openCategory(BuildContext context, _Category c) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => CategoryProductsScreen(category: c.key, label: c.label, icon: c.icon)),
+      MaterialPageRoute(
+        builder: (_) => CategoryProductsScreen(category: c.key, label: c.label, icon: c.icon),
+      ),
     );
   }
 
   void _openViewAll() {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AllProductsScreen()));
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const AllProductsScreen()));
   }
 
-  void _claimCoupon(_Coupon coupon) {
-    if (coupon.claimed) return;
-    setState(() => coupon.claimed = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('🎉 Coupon claimed: ${coupon.title}')),
-    );
+  // ---------------------- COUPON CLAIM: Supabase helpers ---------------------
+
+  Future<void> _ensureCouponExistsOnServer(_Coupon c) async {
+    final sb = Supabase.instance.client;
+    final discountType = c.title.contains('%') ? 'percent' : 'amount';
+    final discountValue = _parseDiscountValue(c.title);
+
+    await sb.from('coupons').upsert({
+      'id': c.id,
+      'title': c.title,
+      'description': c.subtitle,
+      'code': c.id,
+      'image_url': null,
+      'discount_type': discountType,
+      'discount_value': discountValue,
+      'min_spend': null,
+      'expires_at': null,
+      'is_active': true,
+    }, onConflict: 'id');
   }
+
+  num _parseDiscountValue(String title) {
+    final percent = RegExp(r'(\d+)\s*%').firstMatch(title);
+    if (percent != null) return num.parse(percent.group(1)!);
+    final amount = RegExp(r'฿\s*(\d+)').firstMatch(title);
+    if (amount != null) return num.parse(amount.group(1)!);
+    return 0;
+  }
+
+  Future<void> _claimCouponToServer(_Coupon c) async {
+    final sb = Supabase.instance.client;
+    final uid = sb.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) {
+      throw 'Please sign in to claim coupons.';
+    }
+
+    await _ensureCouponExistsOnServer(c);
+
+    final existing = await sb
+        .from('user_coupons')
+        .select('id')
+        .eq('user_id', uid)
+        .eq('coupon_id', c.id)
+        .limit(1);
+
+    if (existing is List && existing.isNotEmpty) return;
+
+    await sb.from('user_coupons').insert({
+      'user_id': uid,
+      'coupon_id': c.id,
+    });
+  }
+
+  void _claimCoupon(_Coupon coupon) async {
+    if (_claimedIds.contains(coupon.id)) return;
+
+    try {
+      await _claimCouponToServer(coupon);
+
+      if (!mounted) return;
+      setState(() {
+        coupon.claimed = true;
+        _claimedIds.add(coupon.id);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🎉 Coupon claimed: ${coupon.title}'),
+          action: SnackBarAction(
+            label: 'View',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const VoucherScreen(initialTab: VoucherTab.available),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('❌ Claim failed: $e')));
+    }
+  }
+
+  // --------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
-      onRefresh: _fetchRecommended,
+      onRefresh: () async {
+        await _fetchRecommended();
+        await _loadClaimedCouponIds();
+      },
       child: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
@@ -311,26 +469,45 @@ class _BuyHomeState extends State<_BuyHome> {
 
           const SizedBox(height: 16),
 
-          // Coupons with Claim button
+          // Coupons with Claim (filtered + empty state)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text('Coupons',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            height: 120,
-            child: ListView.separated(
+
+          if (_visibleCoupons.isEmpty)
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              scrollDirection: Axis.horizontal,
-              itemCount: _coupons.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (_, i) => _CouponCard(
-                coupon: _coupons[i],
-                onClaim: () => _claimCoupon(_coupons[i]),
+              child: Container(
+                height: 110,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Text(
+                  'No coupons available',
+                  style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600),
+                ),
+              ),
+            )
+          else
+            SizedBox(
+              height: 120,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                scrollDirection: Axis.horizontal,
+                itemCount: _visibleCoupons.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (_, i) => _CouponCard(
+                  coupon: _visibleCoupons[i],
+                  onClaim: () => _claimCoupon(_visibleCoupons[i]),
+                ),
               ),
             ),
-          ),
 
           const SizedBox(height: 16),
 
@@ -472,8 +649,7 @@ class _CategoryCard extends StatelessWidget {
                 style: TextStyle(color: fg, fontWeight: FontWeight.w600)),
             if (showSwipeHint) ...[
               const SizedBox(height: 4),
-              Text('Tap →',
-                  style: TextStyle(color: fg.withOpacity(0.7), fontSize: 12)),
+              Text('Tap →', style: TextStyle(color: fg.withOpacity(0.7), fontSize: 12)),
             ],
           ],
         ),
@@ -496,7 +672,10 @@ class _ProductGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       itemCount: products.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 0.72,
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.70,
       ),
       itemBuilder: (_, i) => _ProductCard(data: products[i]),
     );
@@ -519,9 +698,34 @@ class _ProductCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = (data['name'] ?? '').toString();
-    final price = data['price'];
+    final category = (data['category'] ?? '').toString();
     final urls = _extractImageUrls(data['image_urls'] ?? data['imageurl'] ?? data['image_url']);
     final img = urls.isNotEmpty ? urls.first : null;
+
+    final priceRaw = _parseNum(data['price']);
+    final isEvent = (data['is_event'] == true);
+    final discountPercent = (data['discount_percent'] is int)
+        ? data['discount_percent'] as int
+        : int.tryParse('${data['discount_percent'] ?? 0}') ?? 0;
+
+    final bool hasDiscount = isEvent && discountPercent > 0 && priceRaw > 0;
+    final num discounted = hasDiscount
+        ? (priceRaw * (100 - discountPercent)) / 100
+        : priceRaw;
+
+    final sellerId = (data['seller_id'] ?? data['sellerId'] ?? '').toString();
+
+    // Prefer joined user map if your list query selected it:
+    final Map<String, dynamic>? sellerMap =
+        (data['seller'] is Map ? data['seller'] as Map<String, dynamic> : null) ??
+            (data['users']  is Map ? data['users']  as Map<String, dynamic> : null) ??
+            (data['profiles'] is Map ? data['profiles'] as Map<String, dynamic> : null);
+
+    final sellerNameFromRow = (sellerMap?['full_name'] ??
+        data['seller_full_name'] ?? // optional denormalized
+        data['full_name'] ??
+        data['seller_name'])
+        ?.toString();
 
     return Material(
       color: Colors.white,
@@ -534,33 +738,109 @@ class _ProductCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Image + badges overlay
             AspectRatio(
               aspectRatio: 1,
-              child: img == null
-                  ? Container(
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.image_not_supported_outlined, color: Colors.grey),
-              )
-                  : Image.network(img, fit: BoxFit.cover),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: img == null
+                        ? Container(
+                      color: Colors.grey.shade200,
+                      child: const Icon(Icons.image_not_supported_outlined, color: Colors.grey),
+                    )
+                        : Image.network(img, fit: BoxFit.cover),
+                  ),
+                  if (category.isNotEmpty)
+                    Positioned(
+                      left: 8,
+                      top: 8,
+                      child: _CategoryValueBadge(text: category),
+                    ),
+                  if (hasDiscount)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: _DiscountBadge(percent: discountPercent),
+                    ),
+                ],
+              ),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const Spacer(),
-                    Text(
-                      price == null ? '' : '฿ ${price.toString()}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
+            // Compact content
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Name
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+
+                  // Price (with discount if any)
+                  hasDiscount
+                      ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '฿ ${_fmtBaht(discounted)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          height: 1.0,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '฿ ${_fmtBaht(priceRaw)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          decoration: TextDecoration.lineThrough,
+                          decorationThickness: 2,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  )
+                      : Text(
+                    priceRaw == 0 ? '' : '฿ ${_fmtBaht(priceRaw)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, height: 1.0),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  // Seller line
+                  Row(
+                    children: [
+                      Icon(Icons.storefront_rounded, size: 13, color: Colors.grey.shade700),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: sellerNameFromRow != null && sellerNameFromRow.isNotEmpty
+                            ? Text(
+                          sellerNameFromRow,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.0),
+                        )
+                            : _SellerName(sellerId: sellerId),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
@@ -577,7 +857,6 @@ class CategoryProductsScreen extends StatefulWidget {
   final String label;
   final IconData icon;
   const CategoryProductsScreen({super.key, required this.category, required this.label, required this.icon});
-
   @override
   State<CategoryProductsScreen> createState() => _CategoryProductsScreenState();
 }
@@ -603,7 +882,7 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
         category: widget.category,
         limit: 60,
         offset: 0,
-        orderBy: 'created_at',
+        orderBy: 'id',
         ascending: false,
       );
       setState(() => _items = list);
@@ -647,9 +926,10 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
 
 /* ------------------------------ VIEW ALL SCREEN --------------------------- */
 
+enum _AllSort { newest, priceLowHigh, priceHighLow, ratingHighLow }
+
 class AllProductsScreen extends StatefulWidget {
   const AllProductsScreen({super.key});
-
   @override
   State<AllProductsScreen> createState() => _AllProductsScreenState();
 }
@@ -658,6 +938,7 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _items = [];
+  _AllSort _sort = _AllSort.newest;
 
   @override
   void initState() {
@@ -670,19 +951,78 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
       _loading = true;
       _error = null;
     });
+
+    String orderBy = 'id';
+    bool ascending = false;
+
+    switch (_sort) {
+      case _AllSort.newest:
+        orderBy = 'id';
+        ascending = false;
+        break;
+      case _AllSort.priceLowHigh:
+        orderBy = 'price';
+        ascending = true;
+        break;
+      case _AllSort.priceHighLow:
+        orderBy = 'price';
+        ascending = false;
+        break;
+      case _AllSort.ratingHighLow:
+        orderBy = 'rating';
+        ascending = false;
+        break;
+    }
+
     try {
       final list = await SupabaseService.listProducts(
         limit: 120,
         offset: 0,
-        orderBy: 'created_at',
-        ascending: false,
+        orderBy: orderBy,
+        ascending: ascending,
       );
       setState(() => _items = list);
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (_sort == _AllSort.ratingHighLow) {
+        try {
+          final list = await SupabaseService.listProducts(
+            limit: 120,
+            offset: 0,
+            orderBy: 'id',
+            ascending: false,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Rating sort unavailable. Showing newest.")),
+            );
+          }
+          setState(() => _items = list);
+        } catch (ee) {
+          setState(() => _error = ee.toString());
+        }
+      } else {
+        setState(() => _error = e.toString());
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Widget _sortChip(_AllSort value, String label) {
+    final selected = _sort == value;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (s) {
+        if (!s) return;
+        setState(() => _sort = value);
+        _fetch();
+      },
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      selectedColor: Colors.black,
+      labelStyle: TextStyle(color: selected ? Colors.white : Colors.black87),
+      backgroundColor: Colors.grey.shade100,
+    );
   }
 
   @override
@@ -701,10 +1041,38 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
-            ? Center(child: Text('Error: $_error', style: const TextStyle(color: Colors.red)))
-            : _items.isEmpty
-            ? const Center(child: Text('No products yet.'))
-            : _ProductGrid(products: _items),
+            ? ListView(
+          children: [
+            const SizedBox(height: 24),
+            Center(child: Text('Error: $_error', style: const TextStyle(color: Colors.red))),
+          ],
+        )
+            : ListView(
+          children: [
+            const SizedBox(height: 8),
+            // Sort bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _sortChip(_AllSort.newest, 'Newest'),
+                  _sortChip(_AllSort.priceLowHigh, 'Price: Low → High'),
+                  _sortChip(_AllSort.priceHighLow, 'Price: High → Low'),
+                  _sortChip(_AllSort.ratingHighLow, 'Rating: High → Low'),
+                ],
+              ),
+            ),
+            // Grid
+            _items.isEmpty
+                ? const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              child: Center(child: Text('No products yet.')),
+            )
+                : _ProductGrid(products: _items),
+          ],
+        ),
       ),
     );
   }
@@ -727,6 +1095,9 @@ class ProductInput {
   final String category;
   final double price;
   final int stock;
+  // NEW fields
+  final bool isEvent;
+  final int discountPercent;
 
   ProductInput({
     required this.images,
@@ -735,6 +1106,8 @@ class ProductInput {
     required this.category,
     required this.price,
     required this.stock,
+    required this.isEvent,
+    required this.discountPercent,
   });
 }
 
@@ -752,6 +1125,7 @@ class _SellFormState extends State<SellForm> {
   final _descCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _stockCtrl = TextEditingController(text: '1');
+  final _discountCtrl = TextEditingController(text: '0');
 
   final _picker = ImagePicker();
   final List<PickedImage> _images = [];
@@ -759,12 +1133,16 @@ class _SellFormState extends State<SellForm> {
   String? _category;
   bool _submitting = false;
 
+  // NEW: event + discount
+  bool _isEvent = false;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
     _descCtrl.dispose();
     _priceCtrl.dispose();
     _stockCtrl.dispose();
+    _discountCtrl.dispose();
     super.dispose();
   }
 
@@ -816,8 +1194,10 @@ class _SellFormState extends State<SellForm> {
 
     final price = double.tryParse(_priceCtrl.text.trim()) ?? 0;
     final stock = int.tryParse(_stockCtrl.text.trim()) ?? 0;
+    int discount = int.tryParse(_discountCtrl.text.trim()) ?? 0;
+    if (discount < 0) discount = 0;
+    if (discount > 100) discount = 100;
 
-    // default to first category if none chosen
     final category = _category ?? _categories.first.key;
 
     final product = ProductInput(
@@ -827,20 +1207,23 @@ class _SellFormState extends State<SellForm> {
       category: category,
       price: price,
       stock: stock,
+      isEvent: _isEvent,
+      discountPercent: discount,
     );
 
     setState(() => _submitting = true);
     try {
       await widget.onSubmit(product);
       if (!mounted) return;
-      // reset
       setState(() {
         _images.clear();
         _nameCtrl.clear();
         _descCtrl.clear();
         _priceCtrl.clear();
         _stockCtrl.text = '1';
+        _discountCtrl.text = '0';
         _category = null;
+        _isEvent = false;
       });
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -857,7 +1240,6 @@ class _SellFormState extends State<SellForm> {
           key: _formKey,
           child: Column(
             children: [
-              // Photos + buttons
               Row(
                 children: [
                   const Text('Photos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
@@ -877,7 +1259,6 @@ class _SellFormState extends State<SellForm> {
               ),
               const SizedBox(height: 8),
 
-              // Thumbnail grid
               if (_images.isEmpty)
                 Container(
                   height: 160,
@@ -927,7 +1308,6 @@ class _SellFormState extends State<SellForm> {
               ),
               const SizedBox(height: 12),
 
-              // Category dropdown (same 5 as Buy)
               _LightDropdown(
                 value: _category == null ? null : _categories.firstWhere((c) => c.key == _category).label,
                 items: _categories.map((c) => c.label).toList(),
@@ -974,6 +1354,32 @@ class _SellFormState extends State<SellForm> {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+
+              // NEW: Event toggle
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _isEvent,
+                title: const Text('Mark as Event'),
+                subtitle: const Text('Show this listing as part of an event/promo'),
+                onChanged: (v) => setState(() => _isEvent = v),
+              ),
+              const SizedBox(height: 8),
+
+              // NEW: Discount percent
+              _LightInput(
+                controller: _discountCtrl,
+                label: 'Discount (%)',
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                validator: (v) {
+                  final val = int.tryParse((v ?? '').trim());
+                  if (val == null) return 'Enter 0 - 100';
+                  if (val < 0 || val > 100) return 'Discount must be 0–100';
+                  return null;
+                },
+              ),
+
               const SizedBox(height: 20),
 
               SizedBox(
@@ -1006,7 +1412,6 @@ class FullscreenGallery extends StatefulWidget {
   final List<PickedImage> images;
   final int initialIndex;
   const FullscreenGallery({super.key, required this.images, this.initialIndex = 0});
-
   @override
   State<FullscreenGallery> createState() => _FullscreenGalleryState();
 }
@@ -1047,6 +1452,124 @@ class _FullscreenGalleryState extends State<FullscreenGallery> {
 
 /* --------------------------- UI HELPERS / WIDGETS -------------------------- */
 
+class _CategoryValueBadge extends StatelessWidget {
+  final String text;
+  const _CategoryValueBadge({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.65),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          height: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
+class _DiscountBadge extends StatelessWidget {
+  final int percent;
+  const _DiscountBadge({required this.percent});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.red.shade600,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '-$percent%',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          height: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
+/* ------------------------- SELLER NAME (lazy cached) ----------------------- */
+
+class _SellerName extends StatefulWidget {
+  final String sellerId;
+  const _SellerName({required this.sellerId});
+
+  @override
+  State<_SellerName> createState() => _SellerNameState();
+}
+
+class _SellerNameState extends State<_SellerName> {
+  static final Map<String, String> _cache = {}; // memory cache
+  late Future<String> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _fetchFullName();
+  }
+
+  Future<String> _fetchFullName() async {
+    if (widget.sellerId.isEmpty) return 'Unknown seller';
+    if (_cache.containsKey(widget.sellerId)) return _cache[widget.sellerId]!;
+
+    try {
+      final sb = Supabase.instance.client;
+
+      // Fetch from your users table (NOT profiles)
+      final rows = await sb
+          .from('users')
+          .select('full_name, username, name')
+          .eq('id', widget.sellerId)
+          .limit(1);
+
+      if (rows is List && rows.isNotEmpty) {
+        final r = rows.first as Map<String, dynamic>;
+        final fullName =
+        (r['full_name'] ?? r['username'] ?? r['name'] ?? 'Unknown seller').toString();
+
+        _cache[widget.sellerId] = fullName;
+        return fullName;
+      }
+    } catch (e) {
+      debugPrint('Error fetching seller name: $e');
+    }
+
+    return 'Unknown seller';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: _future,
+      builder: (_, snap) {
+        final txt = snap.data ?? 'Unknown seller';
+        return Text(
+          txt,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.0),
+        );
+      },
+    );
+  }
+}
+
+/* ------------------------------- COUPON UI -------------------------------- */
+
 class _Coupon {
   final String id;
   final String title;
@@ -1076,7 +1599,6 @@ class _CouponCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title + icon
           Row(
             children: [
               Icon(
@@ -1120,6 +1642,8 @@ class _CouponCard extends StatelessWidget {
     );
   }
 }
+
+/* ------------------------------ INPUT WIDGETS ------------------------------ */
 
 class _LightInput extends StatelessWidget {
   final TextEditingController controller;
@@ -1218,4 +1742,133 @@ class _LightDropdown extends FormField<String> {
       );
     },
   );
+}
+
+/* ---------------------------- PRODUCT SEARCH ---------------------------- */
+
+class ProductSearchDelegate extends SearchDelegate<String?> {
+  final _sb = Supabase.instance.client;
+
+  @override
+  String? get searchFieldLabel => 'Search products by name';
+
+  @override
+  TextInputType get keyboardType => TextInputType.text;
+
+  @override
+  List<Widget> buildActions(BuildContext context) {
+    return [
+      if (query.isNotEmpty)
+        IconButton(
+          icon: const Icon(Icons.clear),
+          onPressed: () => query = '',
+          tooltip: 'Clear',
+        ),
+    ];
+  }
+
+  @override
+  Widget? buildLeading(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.arrow_back),
+      onPressed: () => close(context, null),
+      tooltip: 'Back',
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) {
+    if (query.trim().isEmpty) {
+      return const _SearchEmptyState(message: 'Type a product name to search');
+    }
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _searchProducts(query.trim()),
+      builder: (_, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snap.hasError) {
+          return _SearchErrorState(error: snap.error.toString());
+        }
+        final items = snap.data ?? const [];
+        if (items.isEmpty) {
+          return const _SearchEmptyState(message: 'No products found');
+        }
+        return _ProductGrid(products: items);
+      },
+    );
+  }
+
+  @override
+  Widget buildSuggestions(BuildContext context) {
+    if (query.trim().isEmpty) {
+      return const _SearchEmptyState(message: 'Try: “iPhone”, “Shoes”, “Makeup”');
+    }
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _searchProducts(query.trim(), limit: 12),
+      builder: (_, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snap.hasError) {
+          return _SearchErrorState(error: snap.error.toString());
+        }
+        final items = snap.data ?? const [];
+        if (items.isEmpty) {
+          return const _SearchEmptyState(message: 'No matches yet');
+        }
+        return _ProductGrid(products: items);
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _searchProducts(String q, {int limit = 60}) async {
+    // Include seller join so search results show full name directly
+    final rows = await _sb
+        .from('products')
+        .select(r'''
+          id, name, description, category, price, stock, image_urls, is_event, discount_percent, seller_id,
+          seller:users!products_seller_id_fkey(full_name)
+        ''')
+        .ilike('name', '%$q%')
+        .order('id', ascending: false)
+        .limit(limit);
+    return (rows as List).cast<Map<String, dynamic>>();
+  }
+}
+
+class _SearchEmptyState extends StatelessWidget {
+  final String message;
+  const _SearchEmptyState({required this.message});
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        const SizedBox(height: 40),
+        Center(
+          child: Text(message, style: TextStyle(color: Colors.grey.shade700)),
+        ),
+      ],
+    );
+  }
+}
+
+class _SearchErrorState extends StatelessWidget {
+  final String error;
+  const _SearchErrorState({required this.error});
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        const SizedBox(height: 40),
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text('Error: $error',
+                textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+          ),
+        ),
+      ],
+    );
+  }
 }

@@ -111,6 +111,9 @@ class SupabaseService {
     required double price,
     required int stock,
     required List<String> imageUrls, // <-- multiple
+    // Optional extras — add if you need them:
+    bool? isEvent,
+    int? discountPercent,
   }) async {
     try {
       final payload = {
@@ -121,6 +124,8 @@ class SupabaseService {
         'price': price,
         'stock': stock,
         'image_urls': imageUrls, // <-- array column in DB
+        if (isEvent != null) 'is_event': isEvent,
+        if (discountPercent != null) 'discount_percent': discountPercent,
       };
       debugPrint('Insert payload keys: ${payload.keys.toList()}');
 
@@ -148,6 +153,8 @@ class SupabaseService {
     required double price,
     required int stock,
     required String imageUrl, // single
+    bool? isEvent,
+    int? discountPercent,
   }) {
     return insertProduct(
       sellerId: sellerId,
@@ -157,6 +164,8 @@ class SupabaseService {
       price: price,
       stock: stock,
       imageUrls: [imageUrl], // wrap
+      isEvent: isEvent,
+      discountPercent: discountPercent,
     );
   }
 
@@ -164,7 +173,7 @@ class SupabaseService {
   /*                               QUERIES                                  */
   /* ---------------------------------------------------------------------- */
 
-  /// Browse products (optionally filter by category).
+  /// Browse products (optionally filter by category), and JOIN seller full_name.
   static Future<List<Map<String, dynamic>>> listProducts({
     int limit = 20,
     int offset = 0,
@@ -175,23 +184,43 @@ class SupabaseService {
     try {
       final table = _client.from(_Config.productsTable);
 
-      List<dynamic> rows;
+      // Join seller info from public.users using the FK (rename to your actual FK if different)
+      final selectClause = r'''
+        id, name, description, category, price, stock, image_urls,
+        is_event, discount_percent, seller_id,
+        seller:users!products_seller_id_fkey(full_name)
+      ''';
+
+      final query = table.select(selectClause);
+
       if (category != null && category.isNotEmpty) {
-        rows = await table
-            .select()
-            .eq('category', category)
-            .order(orderBy, ascending: ascending)
-            .range(offset, offset + limit - 1);
-      } else {
-        rows = await table
-            .select()
-            .order(orderBy, ascending: ascending)
-            .range(offset, offset + limit - 1);
+        query.eq('category', category);
       }
 
-      return rows.map((e) => e as Map<String, dynamic>).toList();
+      final rows = await query
+          .order(orderBy, ascending: ascending)
+          .range(offset, offset + limit - 1);
+
+      return (rows as List).map((e) => e as Map<String, dynamic>).toList();
     } on PostgrestException catch (e, st) {
       debugPrint('List products failed: ${e.message}\n$st');
+
+      // Fallback: try ordering by 'id' if 'created_at' doesn't exist
+      if (orderBy != 'id' && e.message.contains('created_at')) {
+        try {
+          final rows = await _client
+              .from(_Config.productsTable)
+              .select(r'''
+                id, name, description, category, price, stock, image_urls,
+                is_event, discount_percent, seller_id,
+                seller:users!products_seller_id_fkey(full_name)
+              ''')
+              .order('id', ascending: ascending)
+              .range(offset, offset + limit - 1);
+          return (rows as List).map((e) => e as Map<String, dynamic>).toList();
+        } catch (_) {}
+      }
+
       throw StateError('Fetch failed: ${e.message}');
     } catch (e, st) {
       debugPrint('Unknown fetch error: $e\n$st');
