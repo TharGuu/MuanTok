@@ -16,11 +16,11 @@ class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0; // This controls which tab is active
 
   // List of all the pages
-  static const List<Widget> _widgetOptions = <Widget>[
-    HomeScreen(),
-    ShopScreen(),
-    CreateScreen(),
-    MessageScreen(),
+  static final List<Widget> _widgetOptions = <Widget>[
+    const HomeScreen(),
+    const ShopScreen(),
+    const CreateScreen(),
+    const MessageScreen(),
     ProfileScreen(),
   ];
 
