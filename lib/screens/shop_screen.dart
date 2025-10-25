@@ -124,7 +124,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openSearch(context),
                         child: const Icon(
                           Icons.search,
-                          color: Colors.white,
+                          color: Color(0xFFD8BEE5),
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -136,7 +136,7 @@ class _ShopScreenState extends State<ShopScreen> {
                     if (selectedTab == 'Buy') ...[
                       const Icon(
                         Icons.favorite_border_rounded,
-                        color: Colors.white,
+                        color: Color(0xFFD8BEE5),
                         size: 28,
                         shadows: [Shadow(blurRadius: 2)],
                       ),
@@ -147,7 +147,7 @@ class _ShopScreenState extends State<ShopScreen> {
                     if (selectedTab == 'Buy') ...[
                       const Icon(
                         Icons.shopping_cart_outlined,
-                        color: Colors.white,
+                        color: Color(0xFFD8BEE5),
                         size: 28,
                         shadows: [Shadow(blurRadius: 2)],
                       ),
