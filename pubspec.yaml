@@ -63,5 +63,7 @@ flutter:
   assets:
      - assets/images/muan_tok_logo.png
      - .env
+     - assets/banners/christmas_sale.png
+     - assets/banners/promotion.png
 
 
