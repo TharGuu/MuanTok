@@ -4,36 +4,38 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/splash_screen.dart';
 
-Future<void> main() async {
+// 1. main() must be void, not Future<void> async
+void main() {
+  // WidgetsFlutterBinding.ensureInitialized() runs first and sets up the Root Zone
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load environment (works in debug/dev; you can also use dart-define in CI later)
-  await dotenv.load(fileName: ".env");
-
-  final supabaseUrl = dotenv.env['SUPABASE_URL'];
-  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
-
-  if (supabaseUrl == null || supabaseAnonKey == null) {
-    // Fail fast with a clear message in development
-    throw Exception('Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env');
-  }
-
-  // Initialize Supabase
-  await Supabase.initialize(
-    url: supabaseUrl,
-    anonKey: supabaseAnonKey,
-  );
-
-  // Basic error wiring (keeps it simple)
+  // Basic error wiring
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
   };
 
+  // 2. Wrap ALL asynchronous setup logic inside runZonedGuarded
   runZonedGuarded(
-        () => runApp(const MyApp()),
+        () async { // Use async here for the setup function
+      await dotenv.load(fileName: ".env");
+
+      final supabaseUrl = dotenv.env['SUPABASE_URL'];
+      final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+
+      if (supabaseUrl == null || supabaseAnonKey == null) {
+        throw Exception('Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env');
+      }
+
+      await Supabase.initialize(
+        url: supabaseUrl,
+        anonKey: supabaseAnonKey,
+      );
+
+      // 3. runApp is called here, after all awaits are complete
+      runApp(const MyApp());
+    },
         (error, stack) {
-      // TODO: plug in a crash reporter later (Sentry/Crashlytics)
-      // For now, print so we see it in logs
+      // Uncaught error handling
       // ignore: avoid_print
       print('Uncaught error: $error');
     },

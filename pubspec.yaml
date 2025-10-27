@@ -37,6 +37,7 @@ dependencies:
   permission_handler: ^11.3.1
   mime: ^2.0.0
   livekit_client: ^2.5.3
+  rxdart: ^0.28.0
 
 dev_dependencies:
   flutter_test:

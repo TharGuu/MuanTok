@@ -1,11 +1,13 @@
 // lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
+import 'package:muantok/screens/signin_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/user_profile.dart';
 import '../services/profile_service.dart';
 import 'edit_profile_screen.dart';
 import 'main_navigation.dart';
+import 'signin_screen.dart';
 
 // NEW: navigate to the user's product list
 import 'my_products_screen.dart';
@@ -118,7 +120,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _supabase.auth.signOut();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const MainNavigation()),
+        MaterialPageRoute(builder: (_) => const SignInScreen()),
             (_) => false,
       );
       _showSnackbar('You have been logged out.');
