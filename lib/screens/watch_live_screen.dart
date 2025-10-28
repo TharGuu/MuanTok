@@ -27,7 +27,7 @@ class _WatchLiveScreenState extends State<WatchLiveScreen> {
     try {
       final data = await _sp
           .from('streams')
-          .select('id, title, host_id, livekit_room')
+          .select('id, title, host_id, livekit_room, created_at')
           .eq('is_live', true)
           .order('created_at', ascending: false);
 
@@ -84,6 +84,14 @@ class _LivePageState extends State<_LivePage> {
 
   bool _connecting = true;
 
+  // --- Chat state ---
+  final TextEditingController _msgCtrl = TextEditingController();
+  final ScrollController _chatScroll = ScrollController();
+  RealtimeChannel? _commentsChannel;
+  final List<Map<String, dynamic>> _comments = []; // {id, user_id, text, created_at}
+
+  int get _streamId => widget.item['id'] as int;
+
   @override
   void initState() {
     super.initState();
@@ -108,7 +116,7 @@ class _LivePageState extends State<_LivePage> {
       final url = data['url'] as String;
       final token = data['token'] as String;
 
-      // 2) Connect to LiveKit room (2.x API)
+      // 2) Connect to LiveKit room
       final room = Room();
       await room.connect(
         url,
@@ -119,7 +127,7 @@ class _LivePageState extends State<_LivePage> {
         ),
       );
 
-      // 3) Listen for track events
+      // 3) Track events
       final listener = room.createListener()
         ..on<TrackSubscribedEvent>((e) {
           if (e.track is VideoTrack) {
@@ -137,8 +145,12 @@ class _LivePageState extends State<_LivePage> {
           }
         });
 
-      // 4) If publisher already live, pick existing video track
+      // 4) If a publisher is already live, hook into their video
       _pickExistingRemoteVideo(room);
+
+      // 5) Load chat + subscribe to new messages
+      await _loadComments();
+      _subscribeComments();
 
       if (!mounted) return;
       setState(() {
@@ -158,7 +170,7 @@ class _LivePageState extends State<_LivePage> {
   void _pickExistingRemoteVideo(Room room) {
     for (final p in room.remoteParticipants.values) {
       for (final pub in p.videoTrackPublications) {
-        final t = pub.track; // 2.x API: use .track
+        final t = pub.track;
         if (t != null) {
           _setRemoteVideo(t);
           return;
@@ -168,12 +180,11 @@ class _LivePageState extends State<_LivePage> {
   }
 
   Future<void> _setRemoteVideo(VideoTrack? track) async {
-    // Detach and dispose previous renderer
+    // Clean previous renderer
     if (_renderer != null && _remoteVideo != null) {
       try {
-        final mediaStreamTrack = _remoteVideo!.mediaStreamTrack;
         _renderer!.srcObject = null;
-        mediaStreamTrack.enabled = false;
+        _remoteVideo!.mediaStreamTrack.enabled = false;
       } catch (_) {}
       await _renderer!.dispose();
       _renderer = null;
@@ -184,8 +195,6 @@ class _LivePageState extends State<_LivePage> {
     if (track != null) {
       final r = RTCVideoRenderer();
       await r.initialize();
-
-      // Attach LiveKit track to RTC renderer
       r.srcObject = track.mediaStream;
 
       if (!mounted) {
@@ -201,25 +210,106 @@ class _LivePageState extends State<_LivePage> {
     }
   }
 
+  // ---------------- Chat ----------------
+
+  Future<void> _loadComments() async {
+    try {
+      final rows = await _sp
+          .from('stream_comments')
+          .select('id, user_id, text, created_at')
+          .eq('stream_id', _streamId)
+          .order('created_at', ascending: true)
+          .limit(100);
+
+      _comments
+        ..clear()
+        ..addAll(List<Map<String, dynamic>>.from(rows as List));
+      setState(() {});
+      _scrollChatToEnd();
+    } catch (e) {
+      debugPrint('Load comments failed: $e');
+    }
+  }
+
+  void _subscribeComments() {
+    // Clean previous subscription if any
+    _commentsChannel?.unsubscribe();
+
+    _commentsChannel = _sp
+        .channel('realtime:stream_comments')
+        .onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'stream_comments',
+      callback: (payload) {
+        final row = payload.newRecord;
+        if (row != null && row['stream_id'] == _streamId) {
+          setState(() {
+            _comments.add(row);
+          });
+          _scrollChatToEnd();
+        }
+      },
+      // ✅ Correct way for Supabase Flutter >= 2.9.x
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'stream_id',
+        value: _streamId.toString(),
+      ),
+    )
+        .subscribe();
+  }
+
+  void _scrollChatToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_chatScroll.hasClients) {
+        _chatScroll.animateTo(
+          _chatScroll.position.maxScrollExtent + 60,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Future<void> _sendMessage() async {
+    final text = _msgCtrl.text.trim();
+    if (text.isEmpty) return;
+    try {
+      final uid = _sp.auth.currentUser!.id;
+      await _sp.from('stream_comments').insert({
+        'stream_id': _streamId,
+        'user_id': uid,
+        'text': text,
+      });
+      _msgCtrl.clear();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Send failed: $e')),
+      );
+    }
+  }
 
   @override
   void dispose() {
     _listener?.dispose();
 
-    // Clean up renderer safely
     if (_renderer != null && _remoteVideo != null) {
       try {
-        // Detach the media stream from the renderer instead of removeRenderer()
         _renderer!.srcObject = null;
         _remoteVideo!.mediaStreamTrack.enabled = false;
       } catch (_) {}
     }
-
     _renderer?.dispose();
+
+    _commentsChannel?.unsubscribe();
     _room?.dispose();
+
+    _msgCtrl.dispose();
+    _chatScroll.dispose();
+
     super.dispose();
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -228,7 +318,7 @@ class _LivePageState extends State<_LivePage> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ---- LIVE VIDEO or loader ----
+        // --- Video / loader ---
         if (_connecting)
           Container(
             color: Colors.black,
@@ -247,7 +337,7 @@ class _LivePageState extends State<_LivePage> {
             ),
           ),
 
-        // ---- Top bar ----
+        // --- Top bar ---
         Positioned(
           top: safe.top + 10,
           left: 16,
@@ -258,16 +348,9 @@ class _LivePageState extends State<_LivePage> {
               Container(
                 decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(20)),
                 child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-                      child: const Text('Public', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: const Text('Friend', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
+                  children: const [
+                    _TabPill(active: true, label: 'Public'),
+                    _TabPill(active: false, label: 'Friend'),
                   ],
                 ),
               ),
@@ -280,79 +363,84 @@ class _LivePageState extends State<_LivePage> {
           ),
         ),
 
-        // ---- Right side stats ----
+        // --- Chat panel ---
         Positioned(
-          right: 16,
-          bottom: 24,
+          left: 8,
+          right: 8,
+          bottom: 8 + safe.bottom,
           child: Column(
-            children: const [
-              _SideStat(icon: Icons.favorite_rounded, label: '2.3M'),
-              SizedBox(height: 16),
-              _SideStat(icon: Icons.comment_rounded, label: '56.7K'),
-              SizedBox(height: 16),
-              _SideStat(icon: Icons.share_rounded, label: '12.9K'),
-              SizedBox(height: 16),
-              _SideStat(icon: Icons.bookmark_rounded, label: '88.2K'),
-            ],
-          ),
-        ),
-
-        // ---- Bottom overlays (product pill + creator card) ----
-        Positioned(
-          left: 16,
-          right: 80,
-          bottom: 24,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
+              // message list
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: BorderRadius.circular(8)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                  CircleAvatar(radius: 12, backgroundColor: Color(0xFFFFE0E6)),
-                  SizedBox(width: 8),
-                  Text('Bags • the product is quite good',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-                ]),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.85), borderRadius: BorderRadius.circular(12)),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const CircleAvatar(radius: 18, backgroundColor: Colors.white24),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(widget.item['title'] ?? 'Live',
-                              style: const TextStyle(fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Embracing the lilac skies and chasing dreams… #PastelLife',
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.add, size: 16, color: Colors.black87),
-                      label: const Text('Follow',
-                          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFd1c4e9),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ],
+                height: 240,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(12),
                 ),
+                child: ListView.builder(
+                  controller: _chatScroll,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  itemCount: _comments.length,
+                  itemBuilder: (_, i) {
+                    final c = _comments[i];
+                    final content = (c['text'] ?? '') as String;
+                    final uid = (c['user_id'] ?? '') as String;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: _shortUid(uid),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const TextSpan(text: '  '),
+                            TextSpan(
+                              text: content,
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              // input
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _msgCtrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Say something…',
+                        hintStyle: const TextStyle(color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.black.withOpacity(0.35),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onSubmitted: (_) => _sendMessage(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  CircleAvatar(
+                    backgroundColor: Colors.white,
+                    child: IconButton(
+                      icon: const Icon(Icons.send, color: Colors.black87),
+                      onPressed: _sendMessage,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -360,19 +448,33 @@ class _LivePageState extends State<_LivePage> {
       ],
     );
   }
+
+  String _shortUid(String uid) {
+    if (uid.length <= 6) return uid;
+    return '${uid.substring(0, 3)}…${uid.substring(uid.length - 3)}';
+  }
 }
 
-class _SideStat extends StatelessWidget {
-  final IconData icon;
+class _TabPill extends StatelessWidget {
+  final bool active;
   final String label;
-  const _SideStat({required this.icon, required this.label});
+  const _TabPill({required this.active, required this.label});
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Icon(icon, color: Colors.white, size: 34, shadows: const [Shadow(blurRadius: 2)]),
-      const SizedBox(height: 4),
-      Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-    ],
-  );
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: active ? Colors.white : Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: active ? Colors.black : Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
 }
