@@ -1,7 +1,6 @@
 // lib/services/supabase_service.dart
 import 'dart:developer';
 import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -13,12 +12,13 @@ class _Config {
   static const String storageBucketProducts = 'product-images';
   static const String eventsTable = 'events';
   static const String productEventsTable = 'product_events';
+  static const String commentsTable = 'product_comment'; // <- make sure this matches EXACTLY your table name in Supabase
 
   static const String defaultOrderBy = 'id';
 }
 
 /* -------------------------------------------------------------------------- */
-/* SIMPLE MODELS WE USE IN UI                                                 */
+/* SIMPLE MODELS USED IN UI                                                   */
 /* -------------------------------------------------------------------------- */
 
 class ImageToUpload {
@@ -93,7 +93,7 @@ class SupabaseService {
     return uid;
   }
 
-  /* ------------------------------ IMAGES --------------------------------- */
+  /* ------------------------------ IMAGE UPLOAD --------------------------- */
 
   static Future<String> uploadProductImage({
     required Uint8List bytes,
@@ -249,10 +249,8 @@ class SupabaseService {
     );
   }
 
-  /// Helper: get the highest discount_pct (best deal) from product_events
-  /// for each product. Returns Map<product_id, bestDiscountPct>.
-  ///
-  /// 🔓 PUBLIC so search can also call it.
+  /// Return best discount_pct for each product from product_events.
+  /// Map<product_id, bestDiscountPct>
   static Future<Map<int, int>> fetchBestDiscountMapForProducts(
       List<int> productIds) async {
     if (productIds.isEmpty) return {};
@@ -287,13 +285,13 @@ class SupabaseService {
   }
 
   /// listProducts:
-  /// normal product fetch for category / all / recommended.
-  /// After fetch, decorate with best event discount if available.
+  /// used by recommended / category / all.
+  /// then decorate with best event discount.
   static Future<List<Map<String, dynamic>>> listProducts({
     int limit = 20,
     int offset = 0,
     String? category,
-    bool? isEvent, // legacy, caller may still pass this
+    bool? isEvent, // legacy compatibility
     String orderBy = _Config.defaultOrderBy,
     bool ascending = false,
   }) async {
@@ -320,7 +318,6 @@ class SupabaseService {
       }
 
       if (isEvent != null) {
-        // still allow old path (but new flow doesn't really use this)
         query = query.eq('is_event', isEvent);
       }
 
@@ -332,7 +329,7 @@ class SupabaseService {
           .map<Map<String, dynamic>>((row) => row as Map<String, dynamic>)
           .toList();
 
-      // normalize seller
+      // normalize seller field
       for (final p in list) {
         _normalizeSeller(p);
       }
@@ -340,8 +337,7 @@ class SupabaseService {
       // inject best discount from product_events
       final productIds =
       list.map((p) => p['id']).whereType<int>().toList();
-      final bestMap =
-      await fetchBestDiscountMapForProducts(productIds);
+      final bestMap = await fetchBestDiscountMapForProducts(productIds);
 
       for (final p in list) {
         final pid = p['id'] as int?;
@@ -361,8 +357,7 @@ class SupabaseService {
     }
   }
 
-  /// Fetch ALL products that are attached to ANY event (join product_events).
-  /// We'll flatten results and decorate seller like normal.
+  /// all products in any event (flatten join)
   static Future<List<Map<String, dynamic>>>
   listAllEventProductsFlattened() async {
     try {
@@ -394,10 +389,9 @@ class SupabaseService {
         final dPct = mapRow['discount_pct'];
         prod['discount_percent'] =
         dPct is int ? dPct : int.tryParse('$dPct') ?? 0;
-        prod['is_event'] = true; // mark so UI shows badge
+        prod['is_event'] = true;
 
         _normalizeSeller(prod);
-
         result.add(prod);
       }
 
@@ -407,13 +401,12 @@ class SupabaseService {
           'listAllEventProductsFlattened PostgrestException: ${e.message}\n$st');
       throw StateError('Fetch failed: ${e.message}');
     } catch (e, st) {
-      debugPrint(
-          'listAllEventProductsFlattened unknown error: $e\n$st');
+      debugPrint('listAllEventProductsFlattened unknown error: $e\n$st');
       throw StateError('Fetch failed (unknown): $e');
     }
   }
 
-  /// Fetch products for ONE specific event id.
+  /// products for a specific event
   static Future<List<Map<String, dynamic>>> listProductsByEvent({
     required int eventId,
     String orderBy = 'price',
@@ -455,7 +448,7 @@ class SupabaseService {
         result.add(prod);
       }
 
-      // local sort by price
+      // local sort in memory by price
       result.sort((a, b) {
         final pa = (a['price'] ?? 0) as num;
         final pb = (b['price'] ?? 0) as num;
@@ -476,7 +469,7 @@ class SupabaseService {
     }
   }
 
-  /// Attach product to an event after publish
+  /// Link an existing product to an event with discount
   static Future<void> attachProductToEvent({
     required int productId,
     required int eventId,
@@ -520,7 +513,334 @@ class SupabaseService {
     }
   }
 
-  /* ------------------------ OPTIONAL HELPERS ----------------------------- */
+  /// NEW:
+  /// Return the first active event banner for this product (or null if none).
+  /// We'll join product_events -> events, require events.active == true.
+  /// We prefer the event that gives the highest discount_pct.
+  static Future<String?> fetchActiveEventBannerForProduct(
+      int productId) async {
+    final sb = Supabase.instance.client;
+
+    try {
+      final rows = await sb
+          .from(_Config.productEventsTable)
+          .select('''
+            discount_pct,
+            events:events (
+              id,
+              name,
+              active,
+              banner_image_url
+            )
+          ''')
+          .eq('product_id', productId)
+          .eq('events.active', true);
+
+      if (rows is! List || rows.isEmpty) {
+        return null;
+      }
+
+      // pick the row with max discount_pct just to be consistent with "best"
+      rows.sort((a, b) {
+        final apctRaw = a['discount_pct'];
+        final bpctRaw = b['discount_pct'];
+        final apct = apctRaw is num
+            ? apctRaw.toInt()
+            : int.tryParse(apctRaw?.toString() ?? '0') ?? 0;
+        final bpct = bpctRaw is num
+            ? bpctRaw.toInt()
+            : int.tryParse(bpctRaw?.toString() ?? '0') ?? 0;
+        return bpct.compareTo(apct); // desc
+      });
+
+      final top = rows.first;
+      final evMap = top['events'];
+      if (evMap is Map<String, dynamic>) {
+        final banner = evMap['banner_image_url'];
+        if (banner != null && banner.toString().trim().isNotEmpty) {
+          return banner.toString().trim();
+        }
+      }
+
+      return null;
+    } on PostgrestException catch (e, st) {
+      debugPrint(
+          'fetchActiveEventBannerForProduct PostgrestException: ${e.message}\n$st');
+      return null;
+    } catch (e, st) {
+      debugPrint(
+          'fetchActiveEventBannerForProduct unknown error: $e\n$st');
+      return null;
+    }
+  }
+
+  /* ----------------------------- PRODUCT DETAIL --------------------------- */
+
+  static Future<Map<String, dynamic>> fetchProductDetail(int productId) async {
+    final sb = Supabase.instance.client;
+
+    final rows = await sb
+        .from('products')
+        .select('''
+          id,
+          name,
+          description,
+          category,
+          price,
+          stock,
+          image_urls,
+          seller_id,
+          rating,
+          rating_count,
+          seller:users!products_seller_id_fkey(full_name)
+        ''')
+        .eq('id', productId)
+        .limit(1);
+
+    if (rows is! List || rows.isEmpty) {
+      throw 'Product not found';
+    }
+
+    final p = Map<String, dynamic>.from(rows.first);
+
+    // best discount from product_events
+    final best = await fetchBestDiscountMapForProducts([productId]);
+    p['discount_percent'] = best[productId] ?? 0;
+
+    // normalize for UI
+    final sellerMap = p['seller'];
+    if (sellerMap is Map && sellerMap['full_name'] != null) {
+      p['seller_name'] = sellerMap['full_name'];
+    }
+
+    return p;
+  }
+
+  // Product events / discount data for a given product
+  static Future<List<Map<String, dynamic>>> fetchProductEvents(
+      int productId) async {
+    final sb = Supabase.instance.client;
+    final rows = await sb
+        .from('product_events')
+        .select('''
+        discount_pct,
+        events (
+          id,
+          name,
+          ends_at,
+          active,
+          banner_image_url
+        )
+      ''')
+        .eq('product_id', productId);
+
+    final list = <Map<String, dynamic>>[];
+    for (final r in (rows as List)) {
+      final m = r as Map<String, dynamic>;
+      final evMap = m['events'] as Map<String, dynamic>?;
+
+      final pctRaw = m['discount_pct'];
+      final pct =
+      pctRaw is num ? pctRaw : num.tryParse('$pctRaw') ?? 0;
+
+      list.add({
+        'event_id': evMap?['id'],
+        'event_name': evMap?['name'] ?? 'Event',
+        'ends_at': evMap?['ends_at'],
+        'discount_percent': pct,
+        'active': evMap?['active'] == true,
+        'banner_image_url': evMap?['banner_image_url'],
+      });
+    }
+    return list;
+  }
+
+  /* ------------------------------ COMMENTS -------------------------------- */
+
+  /// Fetch latest N comments for 1 product, newest first.
+  /// Used by product detail main screen (preview / latest 10)
+  static Future<List<Map<String, dynamic>>> fetchProductCommentsLimited(
+      int productId, {
+        int limit = 10,
+      }) async {
+    final sb = Supabase.instance.client;
+    final uid = sb.auth.currentUser?.id;
+
+    final rows = await sb
+        .from(_Config.commentsTable)
+        .select('''
+          id,
+          product_id,
+          user_id,
+          content,
+          created_at,
+          users:user_id (
+            full_name
+          )
+        ''')
+        .eq('product_id', productId)
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    final out = <Map<String, dynamic>>[];
+    for (final raw in rows as List) {
+      final m = raw as Map<String, dynamic>;
+      final author = m['users'] as Map<String, dynamic>?;
+      out.add({
+        'id': m['id'],
+        'product_id': m['product_id'],
+        'user_id': m['user_id'],
+        'content': m['content'],
+        'created_at': m['created_at'],
+        'author_name': (author?['full_name'] ?? 'User').toString(),
+        'is_mine': uid != null && uid == m['user_id'],
+      });
+    }
+    return out;
+  }
+
+  /// Fetch ALL comments for a product (no limit), newest first.
+  /// Used by the "View all comments" bottom sheet.
+  static Future<List<Map<String, dynamic>>> fetchAllProductCommentsFull(
+      int productId,
+      ) async {
+    final sb = Supabase.instance.client;
+    final uid = sb.auth.currentUser?.id;
+
+    final rows = await sb
+        .from(_Config.commentsTable)
+        .select('''
+          id,
+          product_id,
+          user_id,
+          content,
+          created_at,
+          users:user_id (
+            full_name
+          )
+        ''')
+        .eq('product_id', productId)
+        .order('created_at', ascending: false);
+
+    final out = <Map<String, dynamic>>[];
+    for (final raw in rows as List) {
+      final m = raw as Map<String, dynamic>;
+      final author = m['users'] as Map<String, dynamic>?;
+
+      out.add({
+        'id': m['id'],
+        'product_id': m['product_id'],
+        'user_id': m['user_id'],
+        'content': m['content'],
+        'created_at': m['created_at'],
+        'author_name': (author?['full_name'] ?? 'User').toString(),
+        'is_mine': uid != null && uid == m['user_id'],
+      });
+    }
+
+    return out;
+  }
+
+  /// Insert new comment
+  static Future<Map<String, dynamic>> addProductComment({
+    required int productId,
+    required String content,
+  }) async {
+    final sb = Supabase.instance.client;
+    final uid = sb.auth.currentUser?.id;
+
+    final rows = await sb
+        .from(_Config.commentsTable)
+        .insert({
+      'product_id': productId,
+      'user_id': uid,
+      'content': content,
+    })
+        .select('''
+          id,
+          product_id,
+          user_id,
+          content,
+          created_at,
+          users:user_id(full_name)
+        ''');
+
+    final inserted = Map<String, dynamic>.from(rows.first);
+    final author = inserted['users'] as Map<String, dynamic>?;
+
+    return {
+      'id': inserted['id'],
+      'product_id': inserted['product_id'],
+      'user_id': inserted['user_id'],
+      'content': inserted['content'],
+      'created_at': inserted['created_at'],
+      'author_name': (author?['full_name'] ?? 'User').toString(),
+      'is_mine': true,
+    };
+  }
+
+  /// Update existing comment (only if owner)
+  static Future<Map<String, dynamic>> editProductComment({
+    required int commentId,
+    required String content,
+  }) async {
+    final sb = Supabase.instance.client;
+    final uid = requireUserId();
+
+    final updatedList = await sb
+        .from(_Config.commentsTable)
+        .update({
+      'content': content,
+    })
+        .eq('id', commentId)
+        .eq('user_id', uid)
+        .select('''
+          id,
+          product_id,
+          user_id,
+          content,
+          created_at,
+          users:user_id (
+            full_name
+          )
+        ''')
+        .limit(1);
+
+    if (updatedList is! List || updatedList.isEmpty) {
+      throw 'Update failed (not owner or not found)';
+    }
+
+    final row = updatedList.first as Map<String, dynamic>;
+    final author = row['users'] as Map<String, dynamic>?;
+
+    final authorDisplay = (author?['full_name'] ?? 'User').toString();
+
+    return {
+      'id': row['id'],
+      'product_id': row['product_id'],
+      'user_id': row['user_id'],
+      'content': row['content'],
+      'created_at': row['created_at'],
+      'author_name': authorDisplay,
+      'is_mine': true,
+    };
+  }
+
+  /// Delete comment (only if owner)
+  static Future<bool> deleteProductComment(int commentId) async {
+    final sb = Supabase.instance.client;
+    final uid = requireUserId();
+
+    await sb
+        .from(_Config.commentsTable)
+        .delete()
+        .eq('id', commentId)
+        .eq('user_id', uid);
+
+    return true;
+  }
+
+  /* ----------------------------- DEBUG HELPERS ---------------------------- */
 
   static Future<Map<String, dynamic>?> getProductById(int productId) async {
     try {
@@ -547,9 +867,8 @@ class SupabaseService {
       final map = row as Map<String, dynamic>;
       _normalizeSeller(map);
 
-      // decorate w/ best discount
-      final bestMap =
-      await fetchBestDiscountMapForProducts([productId]);
+      // decorate best discount
+      final bestMap = await fetchBestDiscountMapForProducts([productId]);
       if (bestMap[productId] != null) {
         map['discount_percent'] = bestMap[productId];
         map['is_event'] = true;
@@ -611,15 +930,57 @@ class SupabaseService {
     }
   }
 
-  /* ---------------------------------------------------------------------- */
-  /* NEW: wrapper for PromotionScreen / EventProductsScreen                 */
-  /* ---------------------------------------------------------------------- */
-
-  /// This is what PromotionScreen expects.
-  /// It just calls listProductsByEvent(...) and returns the same shape
-  /// ProductCard / ProductGrid already understands.
+  /* PromotionScreen / Voucher stuff */
   static Future<List<Map<String, dynamic>>> fetchProductsForEvent(
       int eventId) async {
     return listProductsByEvent(eventId: eventId);
+  }
+
+  // returns products in same category (excluding the current product)
+  static Future<List<Map<String, dynamic>>> fetchRelatedProductsByCategory({
+    required int productId,
+    required String category,
+    int limit = 8,
+  }) async {
+    final sb = Supabase.instance.client;
+
+    final rows = await sb
+        .from('products')
+        .select('''
+        id,
+        name,
+        description,
+        category,
+        price,
+        stock,
+        image_urls,
+        is_event,
+        discount_percent,
+        seller_id,
+        seller:users!products_seller_id_fkey(full_name)
+      ''')
+        .eq('category', category)
+        .neq('id', productId)
+        .order('id', ascending: false)
+        .limit(limit);
+
+    final list =
+    (rows as List).cast<Map<String, dynamic>>();
+
+    // inject best discount from product_events table
+    final productIds =
+    list.map((p) => p['id']).whereType<int>().toList();
+    final bestMap =
+    await fetchBestDiscountMapForProducts(productIds);
+
+    for (final p in list) {
+      final pid = p['id'] as int?;
+      if (pid != null && bestMap.containsKey(pid)) {
+        p['discount_percent'] = bestMap[pid];
+        p['is_event'] = true;
+      }
+    }
+
+    return list;
   }
 }

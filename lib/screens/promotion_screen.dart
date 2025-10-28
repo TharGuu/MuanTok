@@ -1,6 +1,7 @@
 // lib/screens/promotion_screen.dart
 import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
+import 'product_detail_screen.dart';
 
 class PromotionScreen extends StatefulWidget {
   final int eventId;      // which promo/event we're viewing
@@ -53,6 +54,7 @@ class _PromotionScreenState extends State<PromotionScreen> {
 
   @override
   void dispose() {
+    _searchCtrl.removeListener(_applyFiltersLocally);
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -65,11 +67,9 @@ class _PromotionScreenState extends State<PromotionScreen> {
     });
 
     try {
-      // We already have this helper in supabase_service.dart:
-      // listProductsByEvent(eventId: ...)
+      // listProductsByEvent(eventId: ...) is defined in SupabaseService
       final products = await SupabaseService.listProductsByEvent(
         eventId: widget.eventId,
-        // local sort later anyway, so orderBy doesn't matter a ton
       );
 
       setState(() {
@@ -371,10 +371,13 @@ class _ErrorRetry extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        Text(
-          message,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12),
+          ),
         ),
         const SizedBox(height: 12),
         ElevatedButton(
@@ -386,9 +389,46 @@ class _ErrorRetry extends StatelessWidget {
   }
 }
 
+/* ───────────────────── PRODUCT CARD FOR EVENT GRID ───────────────────── */
+
 class _EventProductCard extends StatelessWidget {
   final Map<String, dynamic> product;
   const _EventProductCard({required this.product});
+
+  // helpers to match shop_screen formatting
+  num _parseNum(dynamic v) {
+    if (v is num) return v;
+    if (v is String) {
+      final d = double.tryParse(v);
+      if (d != null) return d;
+    }
+    return 0;
+  }
+
+  String _fmtBaht(num value) {
+    final s = value.toStringAsFixed(2);
+    return s.endsWith('00') ? value.toStringAsFixed(0) : s;
+    // e.g. 2500.00 -> "2500", 199.50 -> "199.5"
+  }
+
+  num _calcDiscountedPrice(num price, num discountPct) {
+    if (discountPct <= 0) return price;
+    final discountAmount = price * (discountPct / 100);
+    final discounted = price - discountAmount;
+    return discounted.round(); // nice clean integer baht
+  }
+
+  List<String> _extractImageUrls(dynamic v) {
+    if (v is List) {
+      return v
+          .map((e) => e?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+    } else if (v is String && v.isNotEmpty) {
+      return [v];
+    }
+    return const [];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -398,164 +438,187 @@ class _EventProductCard extends StatelessWidget {
     final category = (product['category'] ?? '').toString();
 
     // base price
-    final priceRaw = product['price'];
-    final priceNum =
-    priceRaw is num ? priceRaw : num.tryParse('$priceRaw') ?? 0;
-    final priceStr = priceNum.toString();
+    final priceNum = _parseNum(product['price']);
 
-    // injected from SupabaseService.listProductsByEvent()
-    final discountPercentNum =
-    (product['discount_percent'] ?? 0) is num
-        ? (product['discount_percent'] ?? 0) as num
-        : num.tryParse(
-        (product['discount_percent'] ?? '0').toString()) ??
-        0;
+    // discount from SupabaseService.listProductsByEvent()
+    final discountPercentNum = _parseNum(product['discount_percent']);
 
+    final bool hasDiscount =
+        discountPercentNum > 0 && priceNum > 0;
+
+    // discounted price (if any)
+    final discountedPrice = _calcDiscountedPrice(
+      priceNum,
+      discountPercentNum,
+    );
+
+    // seller display
     final sellerName = (product['seller']?['full_name'] ??
         product['seller_full_name'] ??
+        product['full_name'] ??
+        product['seller_name'] ??
         'Unknown Seller')
         .toString();
 
-    // first image
-    String? firstImageUrl;
-    final imgs = product['image_urls'];
-    if (imgs is List && imgs.isNotEmpty) {
-      firstImageUrl = imgs.first?.toString();
-    } else if (imgs is String && imgs.isNotEmpty) {
-      firstImageUrl = imgs;
-    }
+    // first product image
+    final urls = _extractImageUrls(
+      product['image_urls'] ??
+          product['imageurl'] ??
+          product['image_url'],
+    );
+    final firstImageUrl = urls.isNotEmpty ? urls.first : null;
 
-    // price after discount
-    final discountedPrice =
-    _calcDiscountedPrice(priceNum, discountPercentNum);
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: theme.dividerColor.withOpacity(.4),
-        ),
-      ),
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 1.2,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: firstImageUrl != null &&
-                        firstImageUrl.isNotEmpty
-                        ? Image.network(
-                      firstImageUrl,
-                      fit: BoxFit.cover,
-                    )
-                        : Container(
-                      color: Colors.grey.shade300,
-                      child: const Center(
-                        child: Icon(Icons.image_not_supported),
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          // 👇 this is the important part (navigate to product detail)
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ProductDetailScreen(
+                productId: product['id'] as int,
+                initialData: product,
+              ),
+            ),
+          );
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: theme.dividerColor.withOpacity(.4),
+            ),
+          ),
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AspectRatio(
+                aspectRatio: 1.2,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: firstImageUrl != null &&
+                            firstImageUrl.isNotEmpty
+                            ? Image.network(
+                          firstImageUrl,
+                          fit: BoxFit.cover,
+                        )
+                            : Container(
+                          color: Colors.grey.shade300,
+                          child: const Center(
+                            child: Icon(Icons.image_not_supported),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    // category badge
+                    if (category.isNotEmpty)
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        child: _ChipBadge(
+                          text: category,
+                          bg: Colors.black.withOpacity(.75),
+                          fg: Colors.white,
+                        ),
+                      ),
+
+                    // discount badge
+                    if (hasDiscount)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: _ChipBadge(
+                          text: '-${discountPercentNum.toString()}%',
+                          bg: Colors.red,
+                          fg: Colors.white,
+                        ),
+                      ),
+                  ],
                 ),
-                Positioned(
-                  top: 6,
-                  left: 6,
-                  child: _ChipBadge(
-                    text: category,
-                    bg: Colors.black.withOpacity(.75),
-                    fg: Colors.white,
-                  ),
+              ),
+
+              const SizedBox(height: 8),
+
+              // name
+              Text(
+                name,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
                 ),
-                if (discountPercentNum > 0)
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: _ChipBadge(
-                      text: '-${discountPercentNum.toString()}%',
-                      bg: Colors.red,
-                      fg: Colors.white,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+
+              const SizedBox(height: 6),
+
+              // price block
+              hasDiscount
+                  ? Row(
+                children: [
+                  Text(
+                    '฿ ${_fmtBaht(discountedPrice)}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.red,
                     ),
                   ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            name,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 6),
-          if (discountPercentNum > 0)
-            Row(
-              children: [
-                Text(
-                  '฿ ${discountedPrice.toString()}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: Colors.red,
+                  const SizedBox(width: 6),
+                  Text(
+                    '฿ ${_fmtBaht(priceNum)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      decoration: TextDecoration.lineThrough,
+                      color: theme.textTheme.bodySmall?.color
+                          ?.withOpacity(.6),
+                      fontSize: 11,
+                    ),
                   ),
+                ],
+              )
+                  : Text(
+                '฿ ${_fmtBaht(priceNum)}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.red,
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  '฿ $priceStr',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    decoration: TextDecoration.lineThrough,
-                    color: theme.textTheme.bodySmall?.color
-                        ?.withOpacity(.6),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            )
-          else
-            Text(
-              '฿ $priceStr',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: Colors.red,
               ),
-            ),
-          const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.storefront_rounded,
-                size: 14,
-                color: theme.textTheme.bodySmall?.color?.withOpacity(.7),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  sellerName,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontSize: 11,
+
+              const SizedBox(height: 6),
+
+              // seller row
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.storefront_rounded,
+                    size: 14,
                     color: theme.textTheme.bodySmall?.color
-                        ?.withOpacity(.8),
+                        ?.withOpacity(.7),
                   ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      sellerName,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: 11,
+                        color: theme.textTheme.bodySmall?.color
+                            ?.withOpacity(.8),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
-  }
-
-  num _calcDiscountedPrice(num price, num discountPct) {
-    if (discountPct <= 0) return price;
-    final discountAmount = price * (discountPct / 100);
-    final discounted = price - discountAmount;
-    return discounted.round(); // nice clean integer baht
   }
 }
 

@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 import '../features/profile/voucher_screen.dart';
 import 'promotion_screen.dart';
+import 'product_detail_screen.dart';
 
 /* -------------------------------------------------------------------------- */
 /*                               CATEGORY MODEL                               */
@@ -964,6 +965,14 @@ class _ProductCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ProductDetailScreen(
+                productId: data['id'] as int,
+                initialData: data,
+              ),
+            ),
+          );
           // TODO: go to details
         },
         child: Column(
