@@ -1,4 +1,5 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:livekit_client/livekit_client.dart';
@@ -15,8 +16,10 @@ class CreateScreen extends StatefulWidget {
 class _CreateScreenState extends State<CreateScreen> {
   final _sp = Supabase.instance.client;
 
+  // ----- form -----
   final _titleCtrl = TextEditingController(text: 'My Live');
 
+  // ----- livekit / media -----
   Room? _room;
   RTCVideoRenderer? _previewRenderer;
 
@@ -24,17 +27,39 @@ class _CreateScreenState extends State<CreateScreen> {
   bool _isLive = false;
   String? _roomName;
 
+  bool _micOn = true;
+  bool _camOn = true;
+  CameraPosition _cameraPos = CameraPosition.front;
+
+  // ----- comments (streamer-side) -----
+  final TextEditingController _msgCtrl = TextEditingController();
+  final ScrollController _chatScroll = ScrollController();
+  final List<Map<String, dynamic>> _comments = []; // {id, user_id, text, created_at}
+  RealtimeChannel? _cmtsChannel;
+
+  // After we create/upsert the stream row we’ll cache its id here
+  int? _streamId;
+
+  @override
+  void initState() {
+    super.initState();
+  }
+
   @override
   void dispose() {
     _titleCtrl.dispose();
+    _msgCtrl.dispose();
+    _chatScroll.dispose();
     _stopLive(silent: true);
     super.dispose();
   }
 
+  // ===================== LIVE START / STOP =====================
+
   Future<void> _startLive() async {
     if (_isLive || _connecting) return;
 
-    // 1) Ask for permissions
+    // Permissions
     final cam = await Permission.camera.request();
     final mic = await Permission.microphone.request();
     if (!cam.isGranted || !mic.isGranted) {
@@ -49,88 +74,87 @@ class _CreateScreenState extends State<CreateScreen> {
 
     try {
       final uid = _sp.auth.currentUser?.id;
-      if (uid == null) {
-        throw 'Not authenticated';
-      }
+      if (uid == null) throw 'Not authenticated';
 
-      // 2) Generate a room name
+      // Create new room name
       final rnd = Random().nextInt(999999);
       _roomName = 'muan_${uid.substring(0, 6)}_$rnd';
 
-      // 3) Get LiveKit token from your Edge Function
-      final res = await _sp.functions.invoke(
+      // Get LiveKit token from Edge Function
+      final fx = await _sp.functions.invoke(
         'livekit-token',
-        body: {
-          'room': _roomName,
-          'identity': uid,
-          'role': 'host',
-        },
+        body: {'room': _roomName, 'identity': uid, 'role': 'host'},
       );
-
-      // Might throw if function errors
-      final data = (res.data as Map).cast<String, dynamic>();
+      final data = (fx.data as Map).cast<String, dynamic>();
       final url = data['url'] as String;
       final token = data['token'] as String;
 
-      // 4) Connect to LiveKit
+      // Connect to LiveKit
       final room = Room();
       await room.connect(
         url,
         token,
-        roomOptions: const RoomOptions(
-          adaptiveStream: true,
-          dynacast: true,
-        ),
+        roomOptions: const RoomOptions(adaptiveStream: true, dynacast: true),
       );
 
-      // 5) Enable camera & microphone (v2.5+)
+      // Ensure local participant is available
       final local = room.localParticipant;
       if (local == null) {
         throw 'Local participant not available after connect';
       }
 
-      await local.setCameraEnabled(true);
+      // Enable cam+mic with capture options (so we can flip later)
+      await local.setCameraEnabled(
+        true,
+        cameraCaptureOptions: CameraCaptureOptions(cameraPosition: _cameraPos),
+      );
       await local.setMicrophoneEnabled(true);
 
-      // 6) Prepare local preview (use the published camera track)
+      // Prepare local preview (use the published camera track)
       final renderer = RTCVideoRenderer();
       await renderer.initialize();
-
-      LocalVideoTrack? cameraTrack;
-      for (final pub in local.videoTrackPublications) {
-        final t = pub.track;
-        if (t is LocalVideoTrack) {
-          cameraTrack = t;
-          break;
-        }
-      }
-      if (cameraTrack != null) {
-        renderer.srcObject = cameraTrack.mediaStream;
+      final track = _findLocalCameraTrack(local);
+      if (track != null) {
+        renderer.srcObject = track.mediaStream;
       }
 
-      // 7) Upsert 'streams' row (columns: host_id, title, livekit_room, is_live)
-      final title = _titleCtrl.text.trim().isEmpty ? 'Live' : _titleCtrl.text.trim();
+      // Upsert streams row
+      final title =
+      _titleCtrl.text.trim().isEmpty ? 'Live' : _titleCtrl.text.trim();
 
-      final existing = await _sp
-          .from('streams')
-          .select('id')
-          .eq('host_id', uid)
-          .maybeSingle();
+      // Try to find existing stream by host_id
+      final existing =
+      await _sp.from('streams').select('id').eq('host_id', uid).maybeSingle();
 
       if (existing != null) {
-        await _sp.from('streams').update({
+        final updated = await _sp
+            .from('streams')
+            .update({
           'title': title,
           'livekit_room': _roomName,
           'is_live': true,
-        }).eq('id', existing['id']);
+        })
+            .eq('id', existing['id'])
+            .select('id')
+            .single();
+        _streamId = (updated['id'] as num).toInt();
       } else {
-        await _sp.from('streams').insert({
+        final inserted = await _sp
+            .from('streams')
+            .insert({
           'title': title,
           'host_id': uid,
           'livekit_room': _roomName,
           'is_live': true,
-        });
+        })
+            .select('id')
+            .single();
+        _streamId = (inserted['id'] as num).toInt();
       }
+
+      // Load & subscribe comments
+      await _loadComments();
+      _subscribeComments();
 
       if (!mounted) return;
       setState(() {
@@ -146,11 +170,9 @@ class _CreateScreenState extends State<CreateScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _connecting = false);
-
-      // Helpful hint if this is an RLS error (42501)
       final msg = e.toString();
       final hint = msg.contains('42501')
-          ? '\n(RLS blocked the insert/update. Ensure your streams policies allow INSERT/UPDATE for authenticated users where host_id = auth.uid().)'
+          ? '\n(RLS blocked the insert/update. Check your streams policies.)'
           : '';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to go live: $e$hint')),
@@ -162,24 +184,22 @@ class _CreateScreenState extends State<CreateScreen> {
     if (!_isLive && _room == null) return;
 
     try {
-      // 1) Mark offline in DB
+      // Mark offline in DB
       final uid = _sp.auth.currentUser?.id;
       if (uid != null) {
         await _sp.from('streams').update({'is_live': false}).eq('host_id', uid);
       }
 
-      // 2) Disable camera/mic
+      // Disable cam/mic
       final local = _room?.localParticipant;
       if (local != null) {
         try {
           await local.setCameraEnabled(false);
           await local.setMicrophoneEnabled(false);
-        } catch (e) {
-          debugPrint('Failed to disable media: $e');
-        }
+        } catch (_) {}
       }
 
-      // 3) Dispose preview renderer
+      // Dispose preview
       if (_previewRenderer != null) {
         try {
           _previewRenderer!.srcObject = null;
@@ -187,14 +207,19 @@ class _CreateScreenState extends State<CreateScreen> {
         await _previewRenderer!.dispose();
       }
 
-      // 4) Disconnect from LiveKit
+      // Close realtime
+      _cmtsChannel?.unsubscribe();
+      _cmtsChannel = null;
+      _comments.clear();
+
+      // Disconnect room
       final room = _room;
       try {
         await room?.disconnect();
       } catch (_) {}
       await room?.dispose();
     } catch (_) {
-      // swallow cleanup errors
+      // ignore
     } finally {
       if (!mounted) return;
       setState(() {
@@ -202,6 +227,7 @@ class _CreateScreenState extends State<CreateScreen> {
         _room = null;
         _isLive = false;
         _roomName = null;
+        _streamId = null;
       });
       if (!silent) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -210,6 +236,173 @@ class _CreateScreenState extends State<CreateScreen> {
       }
     }
   }
+
+  // ===================== CAMERA / MIC CONTROLS =====================
+
+  Future<void> _toggleMic() async {
+    final room = _room;
+    final local = room?.localParticipant;
+    if (local == null) return;
+    try {
+      final next = !_micOn;
+      await local.setMicrophoneEnabled(next);
+      if (!mounted) return;
+      setState(() => _micOn = next);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Mic toggle failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _toggleCamera() async {
+    final room = _room;
+    final local = room?.localParticipant;
+    if (local == null) return;
+    try {
+      final next = !_camOn;
+      await local.setCameraEnabled(
+        next,
+        cameraCaptureOptions:
+        CameraCaptureOptions(cameraPosition: _cameraPos), // keep position
+      );
+
+      // Keep preview in sync
+      if (next) {
+        final track = _findLocalCameraTrack(local);
+        if (_previewRenderer != null && track != null) {
+          _previewRenderer!.srcObject = track.mediaStream;
+        }
+      } else {
+        if (_previewRenderer != null) {
+          _previewRenderer!.srcObject = null;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() => _camOn = next);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Camera toggle failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _flipCamera() async {
+    final room = _room;
+    final local = room?.localParticipant;
+    if (local == null) return;
+
+    try {
+      _cameraPos = _cameraPos == CameraPosition.front
+          ? CameraPosition.back
+          : CameraPosition.front;
+
+      // Re-enable camera with new position (LiveKit recreates the track)
+      await local.setCameraEnabled(
+        false,
+      );
+      await local.setCameraEnabled(
+        true,
+        cameraCaptureOptions: CameraCaptureOptions(cameraPosition: _cameraPos),
+      );
+
+      // Update preview renderer
+      final track = _findLocalCameraTrack(local);
+      if (_previewRenderer != null && track != null) {
+        _previewRenderer!.srcObject = track.mediaStream;
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Flip camera failed: $e')),
+      );
+    }
+  }
+
+  LocalVideoTrack? _findLocalCameraTrack(LocalParticipant local) {
+    for (final pub in local.videoTrackPublications) {
+      final t = pub.track;
+      if (t is LocalVideoTrack) return t;
+    }
+    return null;
+  }
+
+  // ===================== COMMENTS =====================
+
+  Future<void> _loadComments() async {
+    final sid = _streamId;
+    if (sid == null) return;
+    try {
+      final rows = await _sp
+          .from('stream_comments')
+          .select('id, user_id, text, created_at')
+          .eq('stream_id', sid)
+          .order('created_at', ascending: true)
+          .limit(100);
+
+      _comments
+        ..clear()
+        ..addAll(List<Map<String, dynamic>>.from(rows as List));
+      if (mounted) setState(() {});
+      _scrollChatToEnd();
+    } catch (e) {
+      debugPrint('Load comments failed: $e');
+    }
+  }
+
+  void _subscribeComments() {
+    // Supabase Flutter 2.10.x: avoid filter param mismatch by filtering in callback
+    _cmtsChannel = _sp.channel('realtime:stream_comments')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'stream_comments',
+        callback: (payload) {
+          final row = payload.newRecord;
+          if (row == null) return;
+          if (_streamId != null && row['stream_id'] == _streamId) {
+            _comments.add(row);
+            if (mounted) setState(() {});
+            _scrollChatToEnd();
+          }
+        },
+      )
+      ..subscribe();
+  }
+
+  void _scrollChatToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_chatScroll.hasClients) {
+        _chatScroll.animateTo(
+          _chatScroll.position.maxScrollExtent + 60,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Future<void> _sendMessage() async {
+    final sid = _streamId;
+    final text = _msgCtrl.text.trim();
+    if (sid == null || text.isEmpty) return;
+    try {
+      final uid = _sp.auth.currentUser!.id;
+      await _sp.from('stream_comments').insert({
+        'stream_id': sid,
+        'user_id': uid,
+        'text': text,
+      });
+      _msgCtrl.clear();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Send failed: $e')),
+      );
+    }
+  }
+
+  // ===================== UI =====================
 
   @override
   Widget build(BuildContext context) {
@@ -220,55 +413,118 @@ class _CreateScreenState extends State<CreateScreen> {
         title: const Text('Create Live'),
         centerTitle: true,
       ),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(16, 16 + safe.top, 16, 24),
+      body: Column(
         children: [
-          TextField(
-            controller: _titleCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Title',
-              hintText: 'What are you streaming?',
-              border: OutlineInputBorder(),
+          // ===== TOP: VIDEO AREA =====
+          Expanded(child: _buildVideoArea()),
+
+          // ===== BOTTOM: CONTROLS + CHAT =====
+          _BottomPanel(
+            safeBottom: safe.bottom,
+            isLive: _isLive,
+            roomName: _roomName,
+            micOn: _micOn,
+            camOn: _camOn,
+            onStart: (_isLive || _connecting) ? null : _startLive,
+            onEnd: (_isLive || _room != null) ? () => _stopLive() : null,
+            onToggleCam: (_room == null) ? null : _toggleCamera,
+            onToggleMic: (_room == null) ? null : _toggleMic,
+            onFlipCam: (_room == null) ? null : _flipCamera,
+            comments: _comments,
+            chatScroll: _chatScroll,
+            msgCtrl: _msgCtrl,
+            onSend: _sendMessage,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVideoArea() {
+    return Container(
+      color: Colors.black,
+      alignment: Alignment.center,
+      child: AspectRatio(
+        aspectRatio: 9 / 16,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: _previewRenderer != null
+              ? RTCVideoView(
+            _previewRenderer!,
+            objectFit:
+            RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          )
+              : Center(
+            child: Text(
+              _connecting ? 'Connecting…' : 'Preview will appear here',
+              style: const TextStyle(color: Colors.white70),
             ),
           ),
-          const SizedBox(height: 16),
+        ),
+      ),
+    );
+  }
+}
 
-          // Local Preview
-          AspectRatio(
-            aspectRatio: 9 / 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: _previewRenderer != null
-                    ? RTCVideoView(
-                  _previewRenderer!,
-                  objectFit:
-                  RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                )
-                    : Center(
-                  child: Text(
-                    _connecting
-                        ? 'Connecting…'
-                        : 'Preview will appear here',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ),
-            ),
-          ),
+// ===================== BOTTOM PANEL WIDGET =====================
 
-          const SizedBox(height: 16),
+class _BottomPanel extends StatelessWidget {
+  const _BottomPanel({
+    required this.safeBottom,
+    required this.isLive,
+    required this.roomName,
+    required this.micOn,
+    required this.camOn,
+    required this.onStart,
+    required this.onEnd,
+    required this.onToggleCam,
+    required this.onToggleMic,
+    required this.onFlipCam,
+    required this.comments,
+    required this.chatScroll,
+    required this.msgCtrl,
+    required this.onSend,
+  });
 
-          // Controls
+  final double safeBottom;
+  final bool isLive;
+  final String? roomName;
+
+  final bool micOn;
+  final bool camOn;
+
+  final VoidCallback? onStart;
+  final VoidCallback? onEnd;
+  final VoidCallback? onToggleCam;
+  final VoidCallback? onToggleMic;
+  final VoidCallback? onFlipCam;
+
+  final List<Map<String, dynamic>> comments;
+  final ScrollController chatScroll;
+  final TextEditingController msgCtrl;
+  final Future<void> Function() onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    const double panelHeight = 320;
+
+    return Container(
+      height: panelHeight + safeBottom,
+      padding: EdgeInsets.fromLTRB(12, 12, 12, 12 + safeBottom),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        boxShadow: const [BoxShadow(blurRadius: 14, color: Colors.black12)],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Controls row
           Row(
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: (_isLive || _connecting) ? null : _startLive,
+                  onPressed: onStart,
                   icon: const Icon(Icons.wifi_tethering),
                   label: const Text('Start Live'),
                 ),
@@ -276,22 +532,143 @@ class _CreateScreenState extends State<CreateScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: (_isLive || _room != null) ? () => _stopLive() : null,
+                  onPressed: onEnd,
                   icon: const Icon(Icons.stop),
                   label: const Text('End Live'),
                 ),
               ),
+              const SizedBox(width: 8),
+              _RoundIcon(
+                icon: camOn ? Icons.videocam : Icons.videocam_off,
+                onTap: onToggleCam,
+                tooltip: 'Toggle camera',
+              ),
+              const SizedBox(width: 8),
+              _RoundIcon(
+                icon: micOn ? Icons.mic : Icons.mic_off,
+                onTap: onToggleMic,
+                tooltip: 'Toggle mic',
+              ),
+              const SizedBox(width: 8),
+              _RoundIcon(
+                icon: Icons.cameraswitch,
+                onTap: onFlipCam,
+                tooltip: 'Flip camera',
+              ),
             ],
           ),
-
-          if (_roomName != null) ...[
-            const SizedBox(height: 8),
+          if (roomName != null) ...[
+            const SizedBox(height: 6),
             Text(
-              'Room: $_roomName',
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
+              'Room: $roomName',
+              style: Theme.of(context)
+                  .textTheme
+                  .labelSmall
+                  ?.copyWith(color: Colors.black54),
             ),
           ],
+
+          const SizedBox(height: 8),
+
+          // Chat list
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: ListView.builder(
+                controller: chatScroll,
+                padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                itemCount: comments.length,
+                itemBuilder: (_, i) {
+                  final c = comments[i];
+                  final text = (c['text'] ?? '') as String;
+                  final uid = (c['user_id'] ?? '') as String;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: RichText(
+                      text: TextSpan(
+                        children: [
+                          TextSpan(
+                            text: _shortUid(uid),
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const TextSpan(text: '  '),
+                          TextSpan(
+                            text: text,
+                            style:
+                            const TextStyle(color: Colors.black87),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Chat input
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: msgCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Say something…',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                  ),
+                  onSubmitted: (_) => onSend(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              CircleAvatar(
+                child: IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: () => onSend(),
+                ),
+              ),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  String _shortUid(String uid) {
+    if (uid.length <= 6) return uid;
+    return '${uid.substring(0, 3)}…${uid.substring(uid.length - 3)}';
+  }
+}
+
+class _RoundIcon extends StatelessWidget {
+  const _RoundIcon({required this.icon, required this.onTap, this.tooltip});
+  final IconData icon;
+  final VoidCallback? onTap;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Ink(
+      decoration: const ShapeDecoration(
+        color: Color(0xFFEDEDED),
+        shape: CircleBorder(),
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: Colors.black87),
+        onPressed: onTap,
+        tooltip: tooltip,
       ),
     );
   }
