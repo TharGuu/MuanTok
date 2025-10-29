@@ -16,10 +16,10 @@ class CreateScreen extends StatefulWidget {
 class _CreateScreenState extends State<CreateScreen> {
   final _sp = Supabase.instance.client;
 
-  // ----- form -----
+  /// ---- form
   final _titleCtrl = TextEditingController(text: 'My Live');
 
-  // ----- livekit / media -----
+  /// ---- livekit / media
   Room? _room;
   RTCVideoRenderer? _previewRenderer;
 
@@ -31,19 +31,17 @@ class _CreateScreenState extends State<CreateScreen> {
   bool _camOn = true;
   CameraPosition _cameraPos = CameraPosition.front;
 
-  // ----- comments (streamer-side) -----
+  /// ---- comments (streamer-side)
   final TextEditingController _msgCtrl = TextEditingController();
   final ScrollController _chatScroll = ScrollController();
   final List<Map<String, dynamic>> _comments = []; // {id, user_id, text, created_at}
   RealtimeChannel? _cmtsChannel;
 
-  // After we create/upsert the stream row we’ll cache its id here
+  /// current stream row
   int? _streamId;
 
-  @override
-  void initState() {
-    super.initState();
-  }
+  /// username cache for comments
+  final Map<String, String> _nameCache = {};
 
   @override
   void dispose() {
@@ -99,9 +97,7 @@ class _CreateScreenState extends State<CreateScreen> {
 
       // Ensure local participant is available
       final local = room.localParticipant;
-      if (local == null) {
-        throw 'Local participant not available after connect';
-      }
+      if (local == null) throw 'Local participant not available after connect';
 
       // Enable cam+mic with capture options (so we can flip later)
       await local.setCameraEnabled(
@@ -118,42 +114,27 @@ class _CreateScreenState extends State<CreateScreen> {
         renderer.srcObject = track.mediaStream;
       }
 
-      // Upsert streams row
+      // ALWAYS INSERT a new streams row for this live session
       final title =
       _titleCtrl.text.trim().isEmpty ? 'Live' : _titleCtrl.text.trim();
 
-      // Try to find existing stream by host_id
-      final existing =
-      await _sp.from('streams').select('id').eq('host_id', uid).maybeSingle();
+      final inserted = await _sp
+          .from('streams')
+          .insert({
+        'title': title,
+        'host_id': uid,
+        'livekit_room': _roomName,
+        'is_live': true,
+      })
+          .select('id')
+          .single();
 
-      if (existing != null) {
-        final updated = await _sp
-            .from('streams')
-            .update({
-          'title': title,
-          'livekit_room': _roomName,
-          'is_live': true,
-        })
-            .eq('id', existing['id'])
-            .select('id')
-            .single();
-        _streamId = (updated['id'] as num).toInt();
-      } else {
-        final inserted = await _sp
-            .from('streams')
-            .insert({
-          'title': title,
-          'host_id': uid,
-          'livekit_room': _roomName,
-          'is_live': true,
-        })
-            .select('id')
-            .single();
-        _streamId = (inserted['id'] as num).toInt();
-      }
+      _streamId = (inserted['id'] as num).toInt();
 
-      // Load & subscribe comments
-      await _loadComments();
+      // Reset chat and subscribe for only this session
+      _comments.clear();
+      _nameCache.clear();
+      await _loadComments(); // fresh row = zero
       _subscribeComments();
 
       if (!mounted) return;
@@ -162,6 +143,8 @@ class _CreateScreenState extends State<CreateScreen> {
         _previewRenderer = renderer;
         _isLive = true;
         _connecting = false;
+        _micOn = true;
+        _camOn = true;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -184,7 +167,7 @@ class _CreateScreenState extends State<CreateScreen> {
     if (!_isLive && _room == null) return;
 
     try {
-      // Mark offline in DB
+      // Mark offline in DB (don’t delete the row — keeps VOD/record history if desired)
       final uid = _sp.auth.currentUser?.id;
       if (uid != null) {
         await _sp.from('streams').update({'is_live': false}).eq('host_id', uid);
@@ -211,6 +194,7 @@ class _CreateScreenState extends State<CreateScreen> {
       _cmtsChannel?.unsubscribe();
       _cmtsChannel = null;
       _comments.clear();
+      _nameCache.clear();
 
       // Disconnect room
       final room = _room;
@@ -240,8 +224,7 @@ class _CreateScreenState extends State<CreateScreen> {
   // ===================== CAMERA / MIC CONTROLS =====================
 
   Future<void> _toggleMic() async {
-    final room = _room;
-    final local = room?.localParticipant;
+    final local = _room?.localParticipant;
     if (local == null) return;
     try {
       final next = !_micOn;
@@ -256,8 +239,7 @@ class _CreateScreenState extends State<CreateScreen> {
   }
 
   Future<void> _toggleCamera() async {
-    final room = _room;
-    final local = room?.localParticipant;
+    final local = _room?.localParticipant;
     if (local == null) return;
     try {
       final next = !_camOn;
@@ -274,9 +256,7 @@ class _CreateScreenState extends State<CreateScreen> {
           _previewRenderer!.srcObject = track.mediaStream;
         }
       } else {
-        if (_previewRenderer != null) {
-          _previewRenderer!.srcObject = null;
-        }
+        _previewRenderer?.srcObject = null;
       }
 
       if (!mounted) return;
@@ -288,30 +268,44 @@ class _CreateScreenState extends State<CreateScreen> {
     }
   }
 
+  /// Works for SDKs where `switchCamera` expects a **String** ('front'/'back'),
+  /// and falls back to re-enable with opposite `CameraPosition`.
   Future<void> _flipCamera() async {
-    final room = _room;
-    final local = room?.localParticipant;
+    final local = _room?.localParticipant;
     if (local == null) return;
 
     try {
+      // Try preferred API first: switchCamera on LocalVideoTrack
+      final track = _findLocalCameraTrack(local);
+      if (track != null) {
+        // Your SDK shows 'String' parameter — map CameraPosition -> string
+        final newFacing = _cameraPos == CameraPosition.front ? 'back' : 'front';
+        // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
+        await track.switchCamera(newFacing);
+
+        _cameraPos =
+        _cameraPos == CameraPosition.front ? CameraPosition.back : CameraPosition.front;
+
+        if (mounted) setState(() {});
+        return;
+      }
+
+      // Fallback: disable + re-enable with opposite position
       _cameraPos = _cameraPos == CameraPosition.front
           ? CameraPosition.back
           : CameraPosition.front;
 
-      // Re-enable camera with new position (LiveKit recreates the track)
-      await local.setCameraEnabled(
-        false,
-      );
+      await local.setCameraEnabled(false);
       await local.setCameraEnabled(
         true,
         cameraCaptureOptions: CameraCaptureOptions(cameraPosition: _cameraPos),
       );
 
-      // Update preview renderer
-      final track = _findLocalCameraTrack(local);
-      if (_previewRenderer != null && track != null) {
-        _previewRenderer!.srcObject = track.mediaStream;
+      final t2 = _findLocalCameraTrack(local);
+      if (_previewRenderer != null && t2 != null) {
+        _previewRenderer!.srcObject = t2.mediaStream;
       }
+      if (mounted) setState(() {});
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Flip camera failed: $e')),
@@ -327,7 +321,7 @@ class _CreateScreenState extends State<CreateScreen> {
     return null;
   }
 
-  // ===================== COMMENTS =====================
+  // ===================== COMMENTS (names + cache) =====================
 
   Future<void> _loadComments() async {
     final sid = _streamId;
@@ -343,6 +337,24 @@ class _CreateScreenState extends State<CreateScreen> {
       _comments
         ..clear()
         ..addAll(List<Map<String, dynamic>>.from(rows as List));
+
+      // Preload names for distinct user_ids
+      final ids = _comments.map((c) => c['user_id'] as String).toSet().toList();
+      if (ids.isNotEmpty) {
+        final users = await _sp
+            .from('users')
+            .select('id, full_name')
+            .inFilter('id', ids);
+
+        for (final u in users as List) {
+          final id = u['id'] as String;
+          final name = (u['full_name'] as String?)?.trim();
+          if (name != null && name.isNotEmpty) {
+            _nameCache[id] = name;
+          }
+        }
+      }
+
       if (mounted) setState(() {});
       _scrollChatToEnd();
     } catch (e) {
@@ -351,17 +363,37 @@ class _CreateScreenState extends State<CreateScreen> {
   }
 
   void _subscribeComments() {
-    // Supabase Flutter 2.10.x: avoid filter param mismatch by filtering in callback
-    _cmtsChannel = _sp.channel('realtime:stream_comments')
+    final sid = _streamId;
+    if (sid == null) return;
+
+    // Filter in callback for broad SDK compatibility
+    _cmtsChannel = _sp.channel('realtime:stream_comments_$sid')
       ..onPostgresChanges(
         event: PostgresChangeEvent.insert,
         schema: 'public',
         table: 'stream_comments',
-        callback: (payload) {
+        callback: (payload) async {
           final row = payload.newRecord;
           if (row == null) return;
-          if (_streamId != null && row['stream_id'] == _streamId) {
+          if (row['stream_id'] == sid) {
             _comments.add(row);
+
+            // Warm the name cache if needed
+            final uid = row['user_id'] as String;
+            if (!_nameCache.containsKey(uid)) {
+              try {
+                final user = await _sp
+                    .from('users')
+                    .select('full_name')
+                    .eq('id', uid)
+                    .maybeSingle();
+                final name = (user?['full_name'] as String?)?.trim();
+                if (name != null && name.isNotEmpty) {
+                  _nameCache[uid] = name;
+                }
+              } catch (_) {}
+            }
+
             if (mounted) setState(() {});
             _scrollChatToEnd();
           }
@@ -433,6 +465,7 @@ class _CreateScreenState extends State<CreateScreen> {
             comments: _comments,
             chatScroll: _chatScroll,
             msgCtrl: _msgCtrl,
+            nameFor: _displayNameFor,
             onSend: _sendMessage,
           ),
         ],
@@ -451,8 +484,7 @@ class _CreateScreenState extends State<CreateScreen> {
           child: _previewRenderer != null
               ? RTCVideoView(
             _previewRenderer!,
-            objectFit:
-            RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
           )
               : Center(
             child: Text(
@@ -463,6 +495,14 @@ class _CreateScreenState extends State<CreateScreen> {
         ),
       ),
     );
+  }
+
+  String _displayNameFor(String uid) {
+    final n = _nameCache[uid];
+    if (n != null && n.trim().isNotEmpty) return n;
+    // fallback: short uid
+    if (uid.length <= 6) return uid;
+    return '${uid.substring(0, 3)}…${uid.substring(uid.length - 3)}';
   }
 }
 
@@ -483,6 +523,7 @@ class _BottomPanel extends StatelessWidget {
     required this.comments,
     required this.chatScroll,
     required this.msgCtrl,
+    required this.nameFor,
     required this.onSend,
   });
 
@@ -502,6 +543,7 @@ class _BottomPanel extends StatelessWidget {
   final List<Map<String, dynamic>> comments;
   final ScrollController chatScroll;
   final TextEditingController msgCtrl;
+  final String Function(String uid) nameFor;
   final Future<void> Function() onSend;
 
   @override
@@ -579,8 +621,7 @@ class _BottomPanel extends StatelessWidget {
               ),
               child: ListView.builder(
                 controller: chatScroll,
-                padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 itemCount: comments.length,
                 itemBuilder: (_, i) {
                   final c = comments[i];
@@ -592,7 +633,7 @@ class _BottomPanel extends StatelessWidget {
                       text: TextSpan(
                         children: [
                           TextSpan(
-                            text: _shortUid(uid),
+                            text: nameFor(uid),
                             style: const TextStyle(
                               color: Colors.black87,
                               fontWeight: FontWeight.w700,
@@ -601,8 +642,7 @@ class _BottomPanel extends StatelessWidget {
                           const TextSpan(text: '  '),
                           TextSpan(
                             text: text,
-                            style:
-                            const TextStyle(color: Colors.black87),
+                            style: const TextStyle(color: Colors.black87),
                           ),
                         ],
                       ),
@@ -626,8 +666,8 @@ class _BottomPanel extends StatelessWidget {
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(24),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 12),
+                    contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                   ),
                   onSubmitted: (_) => onSend(),
                 ),
@@ -644,11 +684,6 @@ class _BottomPanel extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _shortUid(String uid) {
-    if (uid.length <= 6) return uid;
-    return '${uid.substring(0, 3)}…${uid.substring(uid.length - 3)}';
   }
 }
 
