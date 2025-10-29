@@ -89,6 +89,7 @@ class _LivePageState extends State<_LivePage> {
   final ScrollController _chatScroll = ScrollController();
   RealtimeChannel? _commentsChannel;
   final List<Map<String, dynamic>> _comments = []; // {id, user_id, text, created_at}
+  final Map<String, String> _nameCache = {};       // user_id -> full_name
 
   int get _streamId => widget.item['id'] as int;
 
@@ -224,7 +225,25 @@ class _LivePageState extends State<_LivePage> {
       _comments
         ..clear()
         ..addAll(List<Map<String, dynamic>>.from(rows as List));
-      setState(() {});
+
+      // Preload names for distinct user_ids
+      final ids = _comments.map((c) => c['user_id'] as String).toSet().toList();
+      if (ids.isNotEmpty) {
+        final users = await _sp
+            .from('users')
+            .select('id, full_name')
+            .inFilter('id', ids); // <- compatible with supabase_flutter 2.10.x
+
+        for (final u in users as List) {
+          final id = u['id'] as String;
+          final name = (u['full_name'] as String?)?.trim();
+          if (name != null && name.isNotEmpty) {
+            _nameCache[id] = name;
+          }
+        }
+      }
+
+      if (mounted) setState(() {});
       _scrollChatToEnd();
     } catch (e) {
       debugPrint('Load comments failed: $e');
@@ -235,29 +254,41 @@ class _LivePageState extends State<_LivePage> {
     // Clean previous subscription if any
     _commentsChannel?.unsubscribe();
 
+    // Broad subscription (filter-less) to avoid SDK filter quirks; filter in callback.
     _commentsChannel = _sp
-        .channel('realtime:stream_comments')
-        .onPostgresChanges(
-      event: PostgresChangeEvent.insert,
-      schema: 'public',
-      table: 'stream_comments',
-      callback: (payload) {
-        final row = payload.newRecord;
-        if (row != null && row['stream_id'] == _streamId) {
+        .channel('realtime:stream_comments_${_streamId}')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'stream_comments',
+        callback: (payload) async {
+          final row = payload.newRecord;
+          if (row == null) return;
+          if (row['stream_id'] != _streamId) return;
+
+          // Resolve name lazily if not cached
+          final uid = row['user_id'] as String;
+          if (!_nameCache.containsKey(uid)) {
+            try {
+              final u = await _sp
+                  .from('users')
+                  .select('full_name')
+                  .eq('id', uid)
+                  .maybeSingle();
+              final n = (u?['full_name'] as String?)?.trim();
+              if (n != null && n.isNotEmpty) {
+                _nameCache[uid] = n;
+              }
+            } catch (_) {}
+          }
+
           setState(() {
             _comments.add(row);
           });
           _scrollChatToEnd();
-        }
-      },
-      // ✅ Correct way for Supabase Flutter >= 2.9.x
-      filter: PostgresChangeFilter(
-        type: PostgresChangeFilterType.eq,
-        column: 'stream_id',
-        value: _streamId.toString(),
-      ),
-    )
-        .subscribe();
+        },
+      )
+      ..subscribe();
   }
 
   void _scrollChatToEnd() {
@@ -386,13 +417,15 @@ class _LivePageState extends State<_LivePage> {
                     final c = _comments[i];
                     final content = (c['text'] ?? '') as String;
                     final uid = (c['user_id'] ?? '') as String;
+                    final name = _nameCache[uid] ?? _shortUid(uid);
+
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: RichText(
                         text: TextSpan(
                           children: [
                             TextSpan(
-                              text: _shortUid(uid),
+                              text: name,
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
