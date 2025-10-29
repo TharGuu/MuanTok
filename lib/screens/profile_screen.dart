@@ -8,6 +8,8 @@ import '../services/profile_service.dart';
 import 'edit_profile_screen.dart';
 import 'main_navigation.dart';
 import 'signin_screen.dart';
+import '../services/messaging_service.dart';
+import 'chat_room_screen.dart';
 
 // NEW: navigate to the user's product list
 import 'my_products_screen.dart';
@@ -25,6 +27,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final ProfileService _profileService = ProfileService();
+  final MessagingService _messagingService = MessagingService();
   final Color primaryPurple = const Color(0xFF673ab7);
   final _supabase = Supabase.instance.client;
 
@@ -216,25 +219,70 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 16),
 
                       if (!_isSelf)
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () => _toggleFollow(user),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                              _isFollowing ? Colors.grey.shade300 : primaryPurple,
-                              minimumSize: const Size(double.infinity, 45),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: Text(
-                              _isFollowing ? 'Following' : 'Follow',
-                              style: TextStyle(
-                                color: _isFollowing ? Colors.black87 : Colors.white,
-                                fontWeight: FontWeight.bold,
+                        Row(
+                          children: [
+                            // --- Button 1: Follow / Following ---
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () => _toggleFollow(user),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _isFollowing ? Colors.grey.shade300 : primaryPurple,
+                                  minimumSize: const Size(double.infinity, 45),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: Text(
+                                  _isFollowing ? 'Following' : 'Follow',
+                                  style: TextStyle(
+                                    color: _isFollowing ? Colors.black87 : Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
+                            const SizedBox(width: 10), // Spacer between buttons
+
+                            // --- Button 2: Message ---
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () async {
+                                  try {
+                                    // Use the service to get or create a chat room
+                                    final roomId = await _messagingService.getOrCreateRoom(user.id);
+
+                                    if (mounted) {
+                                      // Navigate to the chat room screen
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => ChatRoomScreen(
+                                            roomId: roomId,
+                                            otherUserName: user.fullName ?? 'User',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    _showSnackbar('Failed to open chat: ${e.toString()}');
+                                  }
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(double.infinity, 45),
+                                  side: const BorderSide(color: Colors.grey),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Message',
+                                  style: TextStyle(
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
 
                       if (_isSelf) ...[

@@ -10,18 +10,23 @@ class MessagingService {
 
   /// Finds an existing chat room between two users, or creates a new one if it doesn't exist.
   Future<int> getOrCreateRoom(String otherUserId) async {
-    final currentUserId = _supabase.auth.currentUser!.id;
+    try {
+      // Correctly call the RPC function with a single named parameter.
+      // The function itself handles getting the current user's ID on the backend.
+      final response = await _supabase.rpc(
+        'create_or_get_room',
+        params: {
+          'other_user_id': otherUserId, // Pass only the other user's ID
+        },
+      );
 
-    // Use an RPC (Remote Procedure Call) on the database for this complex logic.
-    // This is more efficient and secure than doing multiple queries from the client.
-    // We will create this 'create_or_get_room' function in the next step.
-    final response = await _supabase.rpc(
-      'create_or_get_room',
-      params: {'user_1': currentUserId, 'user_2': otherUserId},
-    );
+      // The RPC function returns the room_id, so we cast it to an integer.
+      return response as int;
 
-    // The RPC will return the ID of the room.
-    return response as int;
+    } catch (e) {
+      // Re-throw the exception to be handled by the UI.
+      throw Exception('Failed to get or create room: $e');
+    }
   }
 
   /// Sends a message to a specific chat room.
@@ -40,47 +45,48 @@ class MessagingService {
 
   /// Listens for new messages in a specific room using Supabase Realtime.
   Stream<List<Message>> getMessagesStream(int roomId) {
-    // This function now correctly handles both initial data and new messages.
+    // This defines a realtime channel that listens for inserts on the messages table
+    final channel = _supabase
+        .from('messages')
+        .stream(primaryKey: ['id']).eq('room_id', roomId);
 
-    // 1. Fetch initial data
-    final initialStream = _supabase
+    // Use a StreamTransformer to process the stream
+    final transformer = StreamTransformer<
+        List<Map<String, dynamic>>, List<Message>>.fromHandlers(
+      handleData: (payload, sink) {
+        // When new data comes in, fetch the whole list again with sender info.
+        // This is a simple and reliable way to ensure data consistency.
+        _supabase
+            .from('messages')
+            .select('*, sender:users(full_name, avatar_url)')
+            .eq('room_id', roomId)
+            .order('created_at', ascending: true)
+            .then((data) {
+          final messages =
+          (data as List<dynamic>).map((msg) => Message.fromJson(msg)).toList();
+          // Add the newly fetched and parsed list to the stream sink
+          sink.add(messages);
+        }).catchError((error) {
+          // If there's an error fetching, add it to the stream sink
+          sink.addError(error);
+        });
+      },
+    );
+
+    // First, fetch the initial data to show something immediately
+    final initialDataFuture = _supabase
         .from('messages')
         .select('*, sender:users(full_name, avatar_url)')
         .eq('room_id', roomId)
-        .order('created_at', ascending: true)
-        .asStream(); // Use asStream() to treat the initial fetch as a stream
+        .order('created_at', ascending: true);
 
-    // 2. Listen for new inserts
-    final realtimeStream = _supabase
-        .from('messages')
-        .stream(primaryKey: ['id'])
-        .eq('room_id', roomId)
-        .order('created_at', ascending: true); // Order new messages too
-
-    // 3. Combine and process the streams
-    return initialStream.asyncMap((initialData) {
-      // This runs once with the initial data
-      final messages =
-      (initialData as List<dynamic>).map((msg) => Message.fromJson(msg)).toList();
-
-      // Now, listen to the realtime stream for any updates
-      return realtimeStream.map((newData) {
-        // When a new message payload comes in...
-        for (var payload in newData) {
-          // ...find if it's an update to an existing message or a new one
-          final index = messages.indexWhere((m) => m.id == payload['id'].toString());
-          if (index != -1) {
-            // If it's an update, replace it
-            messages[index] = Message.fromJson(payload);
-          } else {
-            // If it's a new message, add it to the list
-            messages.add(Message.fromJson(payload));
-          }
-        }
-        // Sort the list one last time to be sure
-        messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-        return messages;
-      }).startWith(messages); // Immediately return the initial list
-    }).switchMap((stream) => stream); // Flatten the stream of streams
+    // Return a new stream that starts with the initial data and then
+    // listens to the realtime channel, transforming its output.
+    return Stream.fromFuture(initialDataFuture).map((data) {
+      return (data as List<dynamic>).map((msg) => Message.fromJson(msg)).toList();
+    }).asyncExpand((initialMessages) {
+      // Start with the initial messages, then pipe the realtime channel through our transformer
+      return channel.transform(transformer).startWith(initialMessages);
+    });
   }
 }

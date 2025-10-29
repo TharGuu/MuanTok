@@ -82,7 +82,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
-                  return const Center(child: Text('An error occurred.'));
+                  return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                            'An error occurred: ${snapshot.error}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ));
                 }
                 if (!snapshot.hasData || snapshot.data!.isEmpty) {
                   return const Center(child: Text('Say hi!'));
