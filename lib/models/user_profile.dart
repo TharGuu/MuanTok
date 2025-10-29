@@ -42,4 +42,17 @@ class UserProfile {
       productsCount: parseCount(map['products_count']),
     );
   }
+
+  factory UserProfile.fromChatList(Map<String, dynamic> json) {
+    return UserProfile(
+      id: json['other_user_id'],
+      fullName: json['other_user_full_name'],
+      avatarUrl: json['other_user_avatar_url'],
+      // The other fields are not needed for the chat list, so they can be null/default.
+      bio: null,
+      followingCount: 0,
+      followersCount: 0,
+      productsCount: 0,
+    );
+  }
 }

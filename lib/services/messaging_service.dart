@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/chat_room.dart';
 import '../models/message.dart'; // We will create this model next
 import 'package:rxdart/rxdart.dart';
 
@@ -88,5 +89,21 @@ class MessagingService {
       // Start with the initial messages, then pipe the realtime channel through our transformer
       return channel.transform(transformer).startWith(initialMessages);
     });
+  }
+  Future<List<ChatRoom>> getChatRooms() async {
+    try {
+      // Call the RPC function we just created
+      final response = await _supabase.rpc('get_chat_rooms_for_user');
+
+      // The response is a List<dynamic>, where each item is a Map
+      if (response is List) {
+        // Use the factory constructor to parse the JSON into ChatRoom objects
+        return response.map((roomJson) => ChatRoom.fromJson(roomJson)).toList();
+      }
+      return [];
+    } catch (e) {
+      // Rethrow the exception to be handled by the UI
+      throw Exception('Failed to fetch chat rooms: $e');
+    }
   }
 }

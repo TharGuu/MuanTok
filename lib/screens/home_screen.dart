@@ -64,7 +64,7 @@ class HomeScreen extends StatelessWidget {
         // 2. Add action buttons for Search and Messages.
         actions: [
           IconButton(
-            icon: const Icon(Icons.search, color: Colors.white),
+            icon: const Icon(Icons.search, color: Colors.black),
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const SearchScreen()),
