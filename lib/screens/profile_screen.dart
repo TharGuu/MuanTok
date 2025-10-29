@@ -10,11 +10,7 @@ import 'main_navigation.dart';
 import 'signin_screen.dart';
 import '../services/messaging_service.dart';
 import 'chat_room_screen.dart';
-
-// NEW: navigate to the user's product list
 import 'my_products_screen.dart';
-
-// Already used in your Account Actions (Voucher entry)
 import '../features/profile/voucher_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -56,11 +52,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _refreshProfile() async {
-    setState(() => _userProfileFuture = _fetchData());
+    final newProfileData = _fetchData();
+
+    setState(() {
+      _userProfileFuture = newProfileData;
+    });
+
+    // --- Step 3: Perform other asynchronous work AFTER setState ---
     if (!_isSelf && _viewerId.isNotEmpty) {
       await _checkFollowing();
     }
   }
+
 
   Future<void> _checkFollowing() async {
     try {
@@ -75,32 +78,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (_) {}
   }
 
+
   Future<void> _toggleFollow(UserProfile user) async {
     if (_viewerId.isEmpty || _isSelf) return;
+    final wasFollowing = _isFollowing;
+    setState(() {
+      _isFollowing = !wasFollowing;
+    });
 
     try {
-      if (_isFollowing) {
+      if (wasFollowing) {
+        // If they were following, delete the connection.
         await _supabase
             .from('connections')
             .delete()
             .match({'follower_id': _viewerId, 'following_id': _targetId});
-        if (!mounted) return;
-        setState(() => _isFollowing = false);
-        await _refreshProfile();
       } else {
+        // If they were not following, insert the connection.
         await _supabase.from('connections').insert({
           'follower_id': _viewerId,
           'following_id': _targetId,
         });
-        if (!mounted) return;
-        setState(() => _isFollowing = true);
-        await _refreshProfile();
       }
+      await _refreshProfile();
+
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Action failed: $e')),
-      );
+
+      setState(() {
+        _isFollowing = wasFollowing;
+      });
+
+      // Handle known 'duplicate key' error gracefully (no message, just sync UI)
+      if (e is PostgrestException && e.code == '23505') {
+        // The state was out of sync. Reverting the UI fix it locally.
+      } else {
+        // For all other unexpected errors, show a message.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Action failed: $e')),
+        );
+      }
+
+      await _refreshProfile();
     }
   }
 
