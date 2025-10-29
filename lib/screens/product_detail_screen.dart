@@ -4,6 +4,7 @@ import 'promotion_screen.dart';
 import 'event_products_screen.dart';
 import '../services/supabase_service.dart';
 import '../features/profile/voucher_screen.dart';
+import 'favourite_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final int productId;
@@ -20,8 +21,39 @@ class ProductDetailScreen extends StatefulWidget {
 }
 
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
+
+  bool _isFavourite = false;
+  bool _togglingFav = false;
   bool _loading = true;
+  int? _favRowId;
   String? _error;
+
+  Map<String, dynamic>? _bestDiscountEvent() {
+    if (_events.isEmpty) return null;
+
+    Map<String, dynamic>? best;
+    int bestPct = -1;
+
+    for (final ev in _events) {
+      // Accept common keys for id/percent/name
+      final int? id = (ev['id'] ?? ev['event_id']) is int
+          ? (ev['id'] ?? ev['event_id']) as int
+          : int.tryParse('${ev['id'] ?? ev['event_id'] ?? ''}');
+
+      final int pct = (ev['discount_percent'] is num)
+          ? (ev['discount_percent'] as num).toInt()
+          : int.tryParse('${ev['discount_percent'] ?? 0}') ?? 0;
+
+      if (id != null && pct > bestPct) {
+        bestPct = pct;
+        best = ev;
+      }
+    }
+
+    // fall back to first event if all percents are invalid
+    return best ?? _events.first;
+  }
+
 
   Map<String, dynamic>? _product; // Product info
   List<Map<String, dynamic>> _events = []; // [{ event_name, discount_percent }]
@@ -67,6 +99,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       await _refreshCommentsOnly(); // force sync preview comments
       await _fetchRelated();        // pull related items
       await _fetchActiveEventBanner(); // pull active banner
+      await _checkFav();            //
+      await _loadFavouriteStatus();
+
     });
   }
 
@@ -165,6 +200,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
+
+
   // NEW: get banner for active event of this product
   Future<void> _fetchActiveEventBanner() async {
     try {
@@ -188,6 +225,113 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       // Ignore silently, banner is optional
     }
   }
+
+  //favourite
+  Future<void> _checkFav() async {
+    try {
+      final fav = await SupabaseService.isFavourited(productId: widget.productId);
+      if (mounted) setState(() => _isFavourite = fav);
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  Future<void> _loadFavouriteStatus() async {
+    final sb = Supabase.instance.client;
+    final uid = sb.auth.currentUser?.id;
+    if (uid == null) return;
+
+    try {
+      final row = await sb
+          .from('favourites')
+          .select('id')
+          .eq('user_id', uid)
+          .eq('product_id', widget.productId)
+          .maybeSingle();
+
+      if (!mounted) return;
+      setState(() {
+        _isFavourite = row != null;
+        _favRowId = row?['id'] as int?;
+      });
+    } catch (_) {
+      // leave defaults on error
+    }
+  }
+
+  Future<void> _toggleFavWithConfirm() async {
+    if (_togglingFav) return;
+
+    final sb = Supabase.instance.client;
+    final uid = sb.auth.currentUser?.id;
+    if (uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in first')),
+      );
+      return;
+    }
+
+    final adding = !_isFavourite;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(adding ? 'Add to favourites' : 'Remove from favourites'),
+        content: Text(adding
+            ? 'Do you want to add this product to your favourites?'
+            : 'Do you want to remove this product from your favourites?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _togglingFav = true);
+    try {
+      if (adding) {
+        final inserted = await sb
+            .from('favourites')
+            .insert({'user_id': uid, 'product_id': widget.productId})
+            .select('id')
+            .single();
+
+        if (!mounted) return;
+        setState(() {
+          _isFavourite = true;
+          _favRowId = inserted['id'] as int?;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Added to favourites')),
+        );
+      } else {
+        await sb
+            .from('favourites')
+            .delete()
+            .eq('user_id', uid)
+            .eq('product_id', widget.productId);
+
+        if (!mounted) return;
+        setState(() {
+          _isFavourite = false;
+          _favRowId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Removed from favourites')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _togglingFav = false);
+    }
+  }
+
+
+
 
 
 
@@ -543,10 +687,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           elevation: 0.5,
           actions: [
             IconButton(
-              onPressed: () {},
+              onPressed: _togglingFav ? null : _toggleFavWithConfirm,
               icon: Icon(
-                Icons.favorite_border_rounded,
-                color: kPurple,
+                _isFavourite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                color: _isFavourite ? Colors.red : kPurple,
               ),
             ),
             IconButton(
@@ -579,9 +723,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     final category = (p?['category'] ?? '').toString();
     final stock = p?['stock'];
 
-    final rawPrice = (p?['price'] ?? 0) is num
-        ? (p?['price'] as num)
-        : (num.tryParse('${p?['price'] ?? 0}') ?? 0);
+    final dynamic _priceField = p?['price'];
+    final num rawPrice = _priceField is num
+        ? _priceField
+        : (_priceField is String ? (num.tryParse(_priceField) ?? 0) : 0);
 
     final discountPct = int.tryParse('${p?['discount_percent'] ?? 0}') ?? 0;
     final hasDiscount = discountPct > 0;
@@ -620,7 +765,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         actions: [
           IconButton(
             onPressed: () {
-              // TODO: favourite
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => FavouriteScreen()),
+              );
             },
             icon: Icon(
               Icons.favorite_border_rounded,
@@ -894,20 +1041,43 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
 
                   // Active Event Banner Section
+// ------------------- ACTIVE EVENT BANNER SECTION -------------------
                   if (_activeEventBannerUrl != null)
                     GestureDetector(
                       onTap: () {
-                        final eventId = _events.isNotEmpty ? _events.first['id'] : null;
-                        final eventName = _events.isNotEmpty ? _events.first['event_name'] : 'Default Event';
-
-                        if (eventId != null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => EventProductsScreen(eventId: eventId),
-                            ),
+                        final chosen = _bestDiscountEvent();
+                        if (chosen == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('No event found for this product.')),
                           );
+                          return;
                         }
+
+                        final int? eventId = (chosen['id'] ?? chosen['event_id']) is int
+                            ? (chosen['id'] ?? chosen['event_id']) as int
+                            : int.tryParse('${chosen['id'] ?? chosen['event_id'] ?? ''}');
+                        final String eventName = (chosen['event_name'] ?? 'Event').toString();
+
+                        if (eventId == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Invalid event id.')),
+                          );
+                          return;
+                        }
+
+                        // 👉 Use PromotionScreen (your shop uses this for events)
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PromotionScreen(eventId: eventId, eventName: eventName),
+                          ),
+                        );
+
+                        // If you prefer the products-only list screen instead, swap to:
+                        // Navigator.push(
+                        //   context,
+                        //   MaterialPageRoute(builder: (_) => EventProductsScreen(eventId: eventId)),
+                        // );
                       },
                       child: Container(
                         margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1115,15 +1285,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: IconButton(
+                      onPressed: _togglingFav ? null : _toggleFavWithConfirm,
                       icon: Icon(
-                        Icons.favorite_border_rounded,
-                        color: kPurple,
+                        _isFavourite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                        color: _isFavourite ? Colors.red : kPurple,
                       ),
-                      onPressed: () {
-                        // TODO: wishlist
-                      },
+                      tooltip: _isFavourite ? 'Remove from favourites' : 'Add to favourites',
                     ),
                   ),
+
                   const SizedBox(width: 12),
 
                   // add to cart

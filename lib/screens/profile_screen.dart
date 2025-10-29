@@ -7,7 +7,7 @@ import '../models/user_profile.dart';
 import '../services/profile_service.dart';
 import 'edit_profile_screen.dart';
 import 'main_navigation.dart';
-import 'signin_screen.dart';
+import 'signin_screen.dart' hide SignInScreen;
 import '../services/messaging_service.dart';
 import 'chat_room_screen.dart';
 import 'my_products_screen.dart';

@@ -582,18 +582,16 @@ class SupabaseService {
     final rows = await sb
         .from('products')
         .select('''
-          id,
-          name,
-          description,
-          category,
-          price,
-          stock,
-          image_urls,
-          seller_id,
-          rating,
-          rating_count,
-          seller:users!products_seller_id_fkey(full_name)
-        ''')
+        id,
+        name,
+        description,
+        category,
+        price,
+        stock,
+        image_urls,
+        seller_id,
+        seller:users!products_seller_id_fkey(full_name)
+      ''')
         .eq('id', productId)
         .limit(1);
 
@@ -613,8 +611,54 @@ class SupabaseService {
       p['seller_name'] = sellerMap['full_name'];
     }
 
+    // If your UI reads rating fields, provide safe defaults
+    p['rating'] = p['rating'] ?? 0;
+    p['rating_count'] = p['rating_count'] ?? 0;
+
     return p;
   }
+
+// Get only products attached to ONE event (strict filter)
+  static Future<List<Map<String, dynamic>>> listProductsForEvent({
+    required int eventId,
+    int limit = 120,
+    int offset = 0,
+  }) async {
+    final sb = Supabase.instance.client;
+
+    final rows = await sb
+        .from('product_events')
+        .select('''
+        product_id,
+        discount_percent,
+        products!inner(
+          id, name, description, category, price, stock,
+          image_urls,
+          seller_id,
+          seller:users!products_seller_id_fkey(full_name)
+        )
+      ''')
+        .eq('event_id', eventId)
+        .order('product_id', ascending: false)
+        .range(offset, offset + limit - 1);
+
+    final List<Map<String, dynamic>> out = [];
+    for (final r in (rows as List)) {
+      final product = (r['products'] ?? {}) as Map<String, dynamic>;
+      if (product.isEmpty) continue;
+
+      // attach event-specific discount ONLY on this map
+      final dp = r['discount_percent'];
+      final discount = dp is int ? dp : int.tryParse('${dp ?? 0}') ?? 0;
+
+      final m = Map<String, dynamic>.from(product);
+      m['event_discount_percent'] = discount;
+      out.add(m);
+    }
+    return out;
+  }
+
+
 
   // Product events / discount data for a given product
   static Future<List<Map<String, dynamic>>> fetchProductEvents(
@@ -983,4 +1027,116 @@ class SupabaseService {
 
     return list;
   }
+
+
+  /* -------------------------------------------------------------------------- */
+/* FAVOURITES                                                                 */
+/* -------------------------------------------------------------------------- */
+
+  /// Add product to user's favourites (idempotent).
+  /// Requires a UNIQUE(user_id, product_id) on table favourites.
+  static Future<void> addFavourite({required int productId}) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) throw StateError('Not logged in');
+
+    await _client
+        .from('favourites')
+        .upsert(
+      {
+        'user_id': uid,
+        'product_id': productId,
+      },
+      onConflict: 'user_id,product_id',
+    )
+        .select()
+        .maybeSingle();
+  }
+
+  /// Remove product from user's favourites.
+  static Future<void> removeFavourite({required int productId}) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) throw StateError('Not logged in');
+
+    await _client
+        .from('favourites')
+        .delete()
+        .eq('user_id', uid)
+        .eq('product_id', productId);
+  }
+
+  /// Check if this product is already favourited by the current user.
+  static Future<bool> isFavourited({required int productId}) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return false;
+
+    final rows = await _client
+        .from('favourites')
+        .select('id')
+        .eq('user_id', uid)
+        .eq('product_id', productId)
+        .limit(1);
+
+    return rows is List && rows.isNotEmpty;
+  }
+
+  /// Toggle favourite status, returns the new state (true = now favourited).
+  static Future<bool> toggleFavourite({required int productId}) async {
+    final favNow = await isFavourited(productId: productId);
+    if (favNow) {
+      await removeFavourite(productId: productId);
+      return false;
+    } else {
+      await addFavourite(productId: productId);
+      return true;
+    }
+  }
+
+  /// List my favourites with joined product info.
+  /// Requires FK favourites.product_id -> products.id.
+  static Future<List<Map<String, dynamic>>> listMyFavourites() async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return [];
+
+    final rows = await _client
+        .from('favourites')
+        .select(
+      // alias joined product as "product"
+      'product:products('
+          'id,name,description,category,price,stock,image_url,image_urls,'
+          'discount_percent,is_event,seller_id,'
+          'seller:users!products_seller_id_fkey(full_name)'
+          ')',
+    )
+        .eq('user_id', uid)
+        .order('created_at', ascending: false);
+
+    // rows looks like: [{ product: {...} }, ...]
+    if (rows is! List) return [];
+
+    // Normalize for UI and inject "best event discount" just like elsewhere
+    final products = <Map<String, dynamic>>[];
+
+    for (final r in rows) {
+      final prod = (r as Map<String, dynamic>)['product'];
+      if (prod is Map<String, dynamic>) {
+        final p = Map<String, dynamic>.from(prod);
+        _normalizeSeller(p);
+        products.add(p);
+      }
+    }
+
+    // optional: decorate with best discount from product_events like listProducts()
+    final ids = products.map((p) => p['id']).whereType<int>().toList();
+    final bestMap = await fetchBestDiscountMapForProducts(ids);
+    for (final p in products) {
+      final pid = p['id'] as int?;
+      if (pid != null && bestMap.containsKey(pid)) {
+        p['discount_percent'] = bestMap[pid];
+        p['is_event'] = true;
+      }
+    }
+
+    return products;
+  }
+
 }

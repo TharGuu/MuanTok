@@ -11,6 +11,16 @@ import '../services/supabase_service.dart';
 import '../features/profile/voucher_screen.dart';
 import 'promotion_screen.dart';
 import 'product_detail_screen.dart';
+import 'favourite_screen.dart';
+
+
+
+void _openFavourites(BuildContext context) {
+  Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => const FavouriteScreen()),
+  );
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*                               CATEGORY MODEL                               */
@@ -135,11 +145,14 @@ class _ShopScreenState extends State<ShopScreen> {
 
                     // favorite icon (heart) - visible on Buy tab
                     if (selectedTab == 'Buy') ...[
-                      const Icon(
-                        Icons.favorite_border_rounded,
-                        color: Color(0xFFD8BEE5),
-                        size: 28,
-                        shadows: [Shadow(blurRadius: 2)],
+                      GestureDetector(
+                        onTap: () => _openFavourites(context),
+                        child: const Icon(
+                          Icons.favorite_border_rounded,
+                          color: Color(0xFFD8BEE5),
+                          size: 28,
+                          shadows: [Shadow(blurRadius: 2)],
+                        ),
                       ),
                       const SizedBox(width: 16),
                     ],
