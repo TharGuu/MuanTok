@@ -12,6 +12,7 @@ import '../features/profile/voucher_screen.dart';
 import 'promotion_screen.dart';
 import 'product_detail_screen.dart';
 import 'favourite_screen.dart';
+import 'cart_screen.dart';
 
 
 
@@ -159,13 +160,22 @@ class _ShopScreenState extends State<ShopScreen> {
 
                     // cart icon - visible on Buy tab
                     if (selectedTab == 'Buy') ...[
-                      const Icon(
-                        Icons.shopping_cart_outlined,
-                        color: Color(0xFFD8BEE5),
-                        size: 28,
-                        shadows: [Shadow(blurRadius: 2)],
+                      IconButton(
+                        tooltip: 'My Cart',
+                        icon: const Icon(
+                          Icons.shopping_cart_outlined,
+                          color: Color(0xFFD8BEE5),
+                          size: 28,
+                          shadows: [Shadow(blurRadius: 2)],
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const CartScreen()),
+                          );
+                        },
                       ),
                     ],
+
 
                     // if you ALSO want icons in Sell tab later,
                     // you can add an `else` with different icons here.
@@ -1306,6 +1316,12 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         titleSpacing: 0,
         elevation: 0.5,
         backgroundColor: Colors.white,

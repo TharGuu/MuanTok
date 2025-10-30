@@ -13,7 +13,7 @@ class _Config {
   static const String eventsTable = 'events';
   static const String productEventsTable = 'product_events';
   static const String commentsTable = 'product_comment'; // <- make sure this matches EXACTLY your table name in Supabase
-
+  static const String cartItemsTable = 'cart_items';
   static const String defaultOrderBy = 'id';
 }
 
@@ -1138,5 +1138,129 @@ class SupabaseService {
 
     return products;
   }
+
+  /* -------------------------------------------------------------------------- */
+/* CART                                                                       */
+/* -------------------------------------------------------------------------- */
+
+  /// Table design (simple): cart_items(user_id, product_id, qty, created_at)
+  /// Make sure you have a UNIQUE(user_id, product_id) on this table.
+  static Future<void> addToCart({required int productId, int qty = 1}) async {
+    final uid = requireUserId();
+    await _client
+        .from(_Config.cartItemsTable)
+        .upsert(
+      {
+        'user_id': uid,
+        'product_id': productId,
+        'qty': qty,
+      },
+      onConflict: 'user_id,product_id',
+    )
+        .select()
+        .maybeSingle();
+  }
+
+  /// Update qty but never exceed product stock (caps at stock).
+  /// Throws if product not found.
+  static Future<void> updateCartQty({required int productId, required int qty}) async {
+    final uid = requireUserId();
+
+    // fetch current stock
+    final prod = await _client
+        .from(_Config.productsTable)
+        .select('stock')
+        .eq('id', productId)
+        .single();
+
+    final stock = (prod['stock'] ?? 0) as int;
+    final safeQty = qty < 1 ? 1 : (qty > stock ? stock : qty);
+
+    await _client
+        .from(_Config.cartItemsTable)
+        .update({'qty': safeQty})
+        .match({'user_id': uid, 'product_id': productId});
+
+    // If you want the caller to know it capped, you can:
+    // if (qty > stock) throw StateError('Requested qty exceeds stock ($stock).');
+  }
+
+  static Future<void> removeFromCart({required int productId}) async {
+    final uid = requireUserId();
+    await _client
+        .from(_Config.cartItemsTable)
+        .delete()
+        .match({'user_id': uid, 'product_id': productId});
+  }
+
+  static Future<void> clearCart() async {
+    final uid = requireUserId();
+    await _client.from(_Config.cartItemsTable).delete().eq('user_id', uid);
+  }
+
+  /// Returns: [{ product: {... with discount_percent }, qty: int }]
+  static Future<List<Map<String, dynamic>>> fetchCartItems() async {
+    final uid = requireUserId();
+
+    final rows = await _client
+        .from(_Config.cartItemsTable)
+        .select('''
+        qty,
+        product:products(
+          id,
+          name,
+          description,
+          category,
+          price,
+          stock,
+          image_urls,
+          seller_id,
+          seller:users!products_seller_id_fkey(full_name)
+        )
+      ''')
+        .eq('user_id', uid)
+        .order('created_at', ascending: false);
+
+    if (rows is! List) return [];
+
+    // normalize + collect ids
+    final out = <Map<String, dynamic>>[];
+    final ids = <int>[];
+    for (final r in rows) {
+      final m = r as Map<String, dynamic>;
+      final prod = m['product'] as Map<String, dynamic>?;
+      if (prod == null) continue;
+
+      final p = Map<String, dynamic>.from(prod);
+      _normalizeSeller(p);
+
+      final pid = p['id'] as int?;
+      if (pid != null) ids.add(pid);
+
+      out.add({
+        'product': p,
+        'qty': (m['qty'] ?? 1) as int,
+      });
+    }
+
+    // inject best discount from product_events
+    if (ids.isNotEmpty) {
+      final bestMap = await fetchBestDiscountMapForProducts(ids);
+      for (final row in out) {
+        final p = row['product'] as Map<String, dynamic>;
+        final pid = p['id'] as int?;
+        if (pid != null && bestMap.containsKey(pid)) {
+          p['discount_percent'] = bestMap[pid]; // used by CartScreen price calc
+          p['is_event'] = true;
+        } else {
+          p['discount_percent'] = 0;
+        }
+      }
+    }
+
+    return out;
+  }
+
+
 
 }

@@ -6,6 +6,7 @@ import '../services/supabase_service.dart';
 import '../features/profile/voucher_screen.dart';
 import 'favourite_screen.dart';
 import 'profile_screen.dart';
+import 'cart_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final int productId;
@@ -366,6 +367,42 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       if (mounted) setState(() => _togglingFav = false);
     }
   }
+
+//add to cart
+  Future<void> _handleAddToCart() async {
+    try {
+      // default add 1 item
+      await SupabaseService.addToCart(productId: widget.productId, qty: 1);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Added to cart'),
+          action: SnackBarAction(
+            label: 'View cart',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CartScreen()),
+              );
+            },
+          ),
+        ),
+      );
+    } on StateError catch (e) {
+      // likely "Not logged in" from requireUserId()
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to add to cart: $e')),
+      );
+    }
+  }
+
 
 
 
@@ -813,13 +850,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           ),
           IconButton(
             onPressed: () {
-              // TODO: open cart
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CartScreen()),
+              );
             },
             icon: Icon(
               Icons.shopping_cart_outlined,
               color: kPurple,
             ),
           ),
+
         ],
       ),
       body: Column(
@@ -1341,25 +1381,20 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   const SizedBox(width: 12),
 
                   // add to cart
+
                   Expanded(
                     child: OutlinedButton(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: kTextDark,
                         side: BorderSide(color: kBorderGrey),
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      onPressed: () {
-                        // TODO: add to cart logic
-                      },
-                      child: const Text(
-                        'Add to cart',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
+                      onPressed: _handleAddToCart,   // ✅ this imports the product into the cart
+                      child: const Text('Add to cart', style: TextStyle(fontWeight: FontWeight.w600)),
                     ),
                   ),
+
                   const SizedBox(width: 12),
 
                   // buy now
