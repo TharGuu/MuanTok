@@ -13,6 +13,10 @@ import 'chat_room_screen.dart';
 import 'my_products_screen.dart';
 import '../features/profile/voucher_screen.dart';
 
+// 👇 NEW: to fetch best discounts and keep card pricing consistent
+import '../services/supabase_service.dart';
+import 'product_detail_screen.dart';
+
 class ProfileScreen extends StatefulWidget {
   final String? userId;
   const ProfileScreen({super.key, this.userId});
@@ -58,12 +62,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _userProfileFuture = newProfileData;
     });
 
-    // --- Step 3: Perform other asynchronous work AFTER setState ---
     if (!_isSelf && _viewerId.isNotEmpty) {
       await _checkFollowing();
     }
   }
-
 
   Future<void> _checkFollowing() async {
     try {
@@ -78,7 +80,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (_) {}
   }
 
-
   Future<void> _toggleFollow(UserProfile user) async {
     if (_viewerId.isEmpty || _isSelf) return;
     final wasFollowing = _isFollowing;
@@ -88,20 +89,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       if (wasFollowing) {
-        // If they were following, delete the connection.
         await _supabase
             .from('connections')
             .delete()
             .match({'follower_id': _viewerId, 'following_id': _targetId});
       } else {
-        // If they were not following, insert the connection.
         await _supabase.from('connections').insert({
           'follower_id': _viewerId,
           'following_id': _targetId,
         });
       }
       await _refreshProfile();
-
     } catch (e) {
       if (!mounted) return;
 
@@ -109,11 +107,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isFollowing = wasFollowing;
       });
 
-      // Handle known 'duplicate key' error gracefully (no message, just sync UI)
       if (e is PostgrestException && e.code == '23505') {
-        // The state was out of sync. Reverting the UI fix it locally.
+        // duplicate key; ignore
       } else {
-        // For all other unexpected errors, show a message.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Action failed: $e')),
         );
@@ -240,7 +236,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       if (!_isSelf)
                         Row(
                           children: [
-                            // --- Button 1: Follow / Following ---
                             Expanded(
                               child: ElevatedButton(
                                 onPressed: () => _toggleFollow(user),
@@ -260,18 +255,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 10), // Spacer between buttons
-
-                            // --- Button 2: Message ---
+                            const SizedBox(width: 10),
                             Expanded(
                               child: OutlinedButton(
                                 onPressed: () async {
                                   try {
-                                    // Use the service to get or create a chat room
                                     final roomId = await _messagingService.getOrCreateRoom(user.id);
-
                                     if (mounted) {
-                                      // Navigate to the chat room screen
                                       Navigator.of(context).push(
                                         MaterialPageRoute(
                                           builder: (_) => ChatRoomScreen(
@@ -329,7 +319,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 10),
 
-                        // UPDATED: go to MyProductsScreen
                         ElevatedButton(
                           onPressed: () {
                             Navigator.push(
@@ -370,6 +359,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onTap: () => _showSnackbar('Go to Followers list'),
                 ),
                 const SizedBox(height: 20),
+
+                // 👇 NEW: Viewer-only published products grid
+                if (!_isSelf) ViewerPublishedProductsSection(sellerId: _targetId),
 
                 if (_isSelf) ...[
                   _SectionHeader(title: 'Account Actions'),
@@ -469,6 +461,303 @@ class _ActionTile extends StatelessWidget {
               fontWeight: FontWeight.w500)),
       trailing: const Icon(Icons.chevron_right, color: Colors.grey),
       onTap: onTap,
+    );
+  }
+}
+
+/* =================================================================== */
+/* ============= Viewer Published Products (NEW SECTION) ============= */
+/* =================================================================== */
+
+class ViewerPublishedProductsSection extends StatefulWidget {
+  final String sellerId;
+  const ViewerPublishedProductsSection({super.key, required this.sellerId});
+
+  @override
+  State<ViewerPublishedProductsSection> createState() =>
+      _ViewerPublishedProductsSectionState();
+}
+
+class _ViewerPublishedProductsSectionState
+    extends State<ViewerPublishedProductsSection> {
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _items = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final sb = Supabase.instance.client;
+      final rows = await sb
+          .from('products')
+          .select('''
+            id,
+            name,
+            description,
+            category,
+            price,
+            stock,
+            image_urls,
+            seller_id,
+            seller:users!products_seller_id_fkey(full_name)
+          ''')
+          .eq('seller_id', widget.sellerId)
+          .order('id', ascending: false)
+          .limit(60);
+
+      final list = (rows as List).cast<Map<String, dynamic>>();
+
+      // inject best discount (uses your existing service)
+      final ids = list.map((e) => e['id']).whereType<int>().toList();
+      final best = await SupabaseService.fetchBestDiscountMapForProducts(ids);
+      for (final p in list) {
+        final pid = p['id'] as int?;
+        if (pid != null && best.containsKey(pid)) {
+          p['discount_percent'] = best[pid];
+          p['is_event'] = true;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() => _items = list);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _SectionHeader(title: 'Published products'),
+
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.only(top: 12, bottom: 20),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+          )
+        else if (_items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('No products yet.'),
+              ),
+            )
+          else
+            GridView.builder(
+              padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _items.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.70,
+              ),
+              itemBuilder: (_, i) => _ViewerProductCard(data: _items[i]),
+            ),
+      ],
+    );
+  }
+}
+
+class _ViewerProductCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ViewerProductCard({required this.data});
+
+  List<String> _extractImageUrls(dynamic v) {
+    if (v is List) {
+      return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+    } else if (v is String && v.isNotEmpty) {
+      return [v];
+    }
+    return const [];
+  }
+
+  num _parseNum(dynamic v) {
+    if (v is num) return v;
+    if (v is String) return double.tryParse(v) ?? 0;
+    return 0;
+  }
+
+  String _fmtBaht(num value) {
+    final s = value.toStringAsFixed(2);
+    return s.endsWith('00') ? value.toStringAsFixed(0) : s;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (data['name'] ?? '').toString();
+    final category = (data['category'] ?? '').toString();
+
+    final urls = _extractImageUrls(
+      data['image_urls'] ?? data['imageurl'] ?? data['image_url'],
+    );
+    final img = urls.isNotEmpty ? urls.first : null;
+
+    final priceRaw = _parseNum(data['price']);
+    final discountPercent = (data['discount_percent'] is int)
+        ? data['discount_percent'] as int
+        : int.tryParse('${data['discount_percent'] ?? 0}') ?? 0;
+    final hasDiscount = discountPercent > 0 && priceRaw > 0;
+    final num discounted =
+    hasDiscount ? (priceRaw * (100 - discountPercent)) / 100 : priceRaw;
+
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ProductDetailScreen(
+                productId: data['id'] as int,
+                initialData: data,
+              ),
+            ),
+          );
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AspectRatio(
+              aspectRatio: 1,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: img == null
+                        ? Container(
+                      color: Colors.grey.shade200,
+                      child: const Icon(
+                        Icons.image_not_supported_outlined,
+                        color: Colors.grey,
+                      ),
+                    )
+                        : Image.network(img, fit: BoxFit.cover),
+                  ),
+                  if (category.isNotEmpty)
+                    Positioned(
+                      left: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.65),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          category,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (hasDiscount)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade600,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '-$discountPercent%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  hasDiscount
+                      ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '฿ ${_fmtBaht(discounted)}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          height: 1.0,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '฿ ${_fmtBaht(priceRaw)}',
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          decoration: TextDecoration.lineThrough,
+                          decorationThickness: 2,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                          height: 1.0,
+                        ),
+                      ),
+                    ],
+                  )
+                      : Text(
+                    priceRaw == 0 ? '' : '฿ ${_fmtBaht(priceRaw)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
