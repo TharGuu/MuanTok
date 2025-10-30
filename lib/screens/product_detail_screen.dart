@@ -5,6 +5,7 @@ import 'event_products_screen.dart';
 import '../services/supabase_service.dart';
 import '../features/profile/voucher_screen.dart';
 import 'favourite_screen.dart';
+import 'profile_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final int productId;
@@ -199,6 +200,42 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       // optional UI -> ignore error
     }
   }
+
+  // Try to read seller id from the data you already have.
+// Falls back to null if not available yet.
+  String? _extractSellerId(Map<String, dynamic>? data) {
+    if (data == null) return null;
+    final v = data['seller_id'] ?? data['sellerId'] ?? data['seller']?['id'];
+    if (v is String && v.isNotEmpty) return v;
+    return v?.toString();
+  }
+
+
+  void _openSellerStore() async {
+    // Prefer seller_id from the initial product snapshot first
+    final fromInitial = _extractSellerId(widget.initialData as Map<String, dynamic>?);
+
+    // If you keep a fetched/merged product map in state, try that too:
+    final fromLoaded = _extractSellerId(_product); // <- replace _product with your variable
+
+    final sellerId = fromInitial ?? fromLoaded;
+    if (sellerId == null || sellerId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Seller not found for this product')),
+        );
+      }
+      return;
+    }
+
+    // Jump to viewer-mode profile (Published products grid will show there)
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(userId: sellerId),
+      ),
+    );
+  }
+
 
 
 
@@ -1015,19 +1052,26 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                               TextButton(
                                 onPressed: () {
-                                  // TODO: open seller shop screen
+                                  // Try from your loaded product first (rename `_product` if yours is different)
+                                  final sellerId =
+                                      _extractSellerId(_product as Map<String, dynamic>?) ??
+                                          _extractSellerId(widget.initialData as Map<String, dynamic>?);
+
+                                  if (sellerId == null || sellerId.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Seller not found for this product')),
+                                    );
+                                    return;
+                                  }
+
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(builder: (_) => ProfileScreen(userId: sellerId)),
+                                  );
                                 },
-                                style: TextButton.styleFrom(
-                                  foregroundColor: kPurple,
-                                ),
-                                child: Text(
-                                  'View shop',
-                                  style: TextStyle(
-                                    color: kPurple,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
+                                style: TextButton.styleFrom(foregroundColor: kPurple),
+                                child: const Text('View shop', style: TextStyle(fontWeight: FontWeight.w600)),
                               ),
+
                             ],
                           ),
                         ),
