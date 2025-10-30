@@ -12,6 +12,7 @@ import '../services/messaging_service.dart';
 import 'chat_room_screen.dart';
 import 'my_products_screen.dart';
 import '../features/profile/voucher_screen.dart';
+import 'connections_screen.dart';
 
 // 👇 NEW: to fetch best discounts and keep card pricing consistent
 import '../services/supabase_service.dart';
@@ -350,13 +351,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   title: 'Following',
                   count: user.followingCount,
                   formatCount: _formatCount,
-                  onTap: () => _showSnackbar('Go to Following list'),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => ConnectionsScreen(
+                              userId: _targetId,
+                              mode: ConnectionsMode.following,
+                              initialCount: user.followingCount,
+                          ),
+                      ),
+                    );
+                  },
                 ),
                 _ConnectionTile(
                   title: 'Followers',
                   count: user.followersCount,
                   formatCount: _formatCount,
-                  onTap: () => _showSnackbar('Go to Followers list'),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => ConnectionsScreen(
+                              userId: _targetId,
+                              mode: ConnectionsMode.followers,
+                              initialCount: user.followersCount,
+                          ),
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 20),
 

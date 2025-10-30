@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart'; // Assume this file holds the UserProfile class
+import 'package:muantok/screens/connections_screen.dart';
 
 class ProfileService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -96,5 +97,35 @@ class ProfileService {
       print('Unexpected Update Error: $e');
       rethrow;
     }
+  }
+
+  Future<List<UserProfile>> fetchConnections({
+    required String userId,
+    required ConnectionsMode mode,
+  }) async {
+    final response = await _supabase.rpc(
+      'get_user_connections',
+      params: {
+        'p_user_id': userId,
+        'p_mode': mode == ConnectionsMode.following ? 'following' : 'followers',
+      },
+    );
+
+    if (response is List) {
+      // We can reuse the UserProfile.fromChatList constructor if it fits,
+      // or create a more specific one. For now, let's make a simple one.
+      return response.map((data) {
+        return UserProfile(
+          id: data['id'],
+          fullName: data['full_name'],
+          avatarUrl: data['avatar_url'],
+          // Provide default values for non-nullable fields
+          followersCount: 0,
+          followingCount: 0,
+          productsCount: 0,
+        );
+      }).toList();
+    }
+    return [];
   }
 }
