@@ -2,9 +2,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'product_detail_screen.dart';
 
-/// Change if your bucket name is different.
 const String kProductImagesBucket = 'product-images';
+
+class BrandColors {
+  static const deep = Color(0xFF7C3AED);   // primary
+  static const soft = Color(0xFFA78BFA);   // accent
+  static const pastel = Color(0xFFD8BEE5); // your earlier pick
+  static const chipBg = Color(0x803C1E70); // translucent purple
+}
 
 class MyProductsScreen extends StatefulWidget {
   const MyProductsScreen({super.key});
@@ -56,7 +63,14 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
     try {
       final rows = await _sb
           .from('products')
-          .select('*')
+          .select(r'''
+            id, name, price, category, image_urls,
+            is_event, discount_percent,
+            product_events(
+              discount_pct,
+              events(active, ends_at)
+            )
+          ''')
           .eq('seller_id', _uid)
           .order('id', ascending: false);
 
@@ -77,15 +91,24 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
       schema: 'public',
       table: 'products',
       filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq, column: 'seller_id', value: _uid),
+        type: PostgresChangeFilterType.eq,
+        column: 'seller_id',
+        value: _uid,
+      ),
       callback: (_) => _scheduleRefresh(),
     )
         .onPostgresChanges(
       event: PostgresChangeEvent.update,
       schema: 'public',
       table: 'products',
-      filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq, column: 'seller_id', value: _uid),
+      filter: PostgresChangeFilterType.eq ==
+          PostgresChangeFilterType.eq // keep analyzer happy
+          ? PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'seller_id',
+        value: _uid,
+      )
+          : null,
       callback: (_) => _scheduleRefresh(),
     )
         .onPostgresChanges(
@@ -107,7 +130,7 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
   }
 
   List<String> _extractImageUrls(Map<String, dynamic> data) {
-    final v = data['image_urls'] ?? data['imageurl'] ?? data['image_url'];
+    final v = data['image_urls'];
     if (v is List) {
       return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
     } else if (v is String && v.isNotEmpty) {
@@ -179,46 +202,86 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        elevation: 0.5,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        title: const Text('My Products'),
-      ),
-      backgroundColor: Colors.white,
-      body: RefreshIndicator(
-        onRefresh: _fetch,
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-            ? ListView(
-          children: [
-            const SizedBox(height: 24),
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('Error: $_error',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.red)),
-              ),
+    return Stack(
+      children: [
+        // 🌈 Background gradient
+        const _PurpleBackdrop(),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            elevation: 0,
+            centerTitle: false,
+            backgroundColor: Colors.transparent,
+            foregroundColor: Colors.white,
+            title: const Text(
+              'My Products',
+              style: TextStyle(fontWeight: FontWeight.w700),
             ),
+          ),
+          body: RefreshIndicator(
+            color: BrandColors.deep,
+            backgroundColor: Colors.white,
+            onRefresh: _fetch,
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                : _error != null
+                ? ListView(
+              children: [
+                const SizedBox(height: 24),
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      'Error: $_error',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            )
+                : _items.isEmpty
+                ? ListView(
+              children: const [
+                SizedBox(height: 40),
+                Center(
+                    child: Text(
+                      'You haven’t published any products yet.',
+                      style: TextStyle(color: Colors.white),
+                    )),
+                SizedBox(height: 8),
+              ],
+            )
+                : _MyProductsGrid(
+              products: _items,
+              onDelete: _deleteProduct,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/* ------------------------------ BACKDROP ----------------------------------- */
+
+class _PurpleBackdrop extends StatelessWidget {
+  const _PurpleBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            BrandColors.deep,
+            BrandColors.soft,
           ],
-        )
-            : _items.isEmpty
-            ? ListView(
-          children: const [
-            SizedBox(height: 40),
-            Center(child: Text('You haven’t published any products yet.')),
-            SizedBox(height: 8),
-          ],
-        )
-            : _MyProductsGrid(
-          products: _items,
-          onDelete: _deleteProduct,
         ),
       ),
+      child: const SizedBox.expand(),
     );
   }
 }
@@ -234,14 +297,13 @@ class _MyProductsGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: products.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 0.72,
+        childAspectRatio: 0.66, // taller to avoid overflow
       ),
       itemBuilder: (_, i) => _MyProductCard(
         data: products[i],
@@ -265,28 +327,110 @@ class _MyProductCard extends StatelessWidget {
     return const [];
   }
 
+  int? _bestActiveDiscountPercent(Map<String, dynamic> product) {
+    final now = DateTime.now();
+    int? best;
+    final rel = product['product_events'];
+    if (rel is List) {
+      for (final row in rel.whereType<Map>()) {
+        final m = row.cast<String, dynamic>();
+        final dpRaw = m['discount_pct'];
+        final int? pct =
+        (dpRaw is num) ? dpRaw.toInt() : (dpRaw is String ? int.tryParse(dpRaw) : null);
+
+        final ev = m['events'];
+        bool active = true;
+        DateTime? endsAt;
+        if (ev is Map) {
+          final a = ev['active'];
+          if (a is bool) active = a;
+          final endRaw = ev['ends_at'];
+          if (endRaw is String) endsAt = DateTime.tryParse(endRaw);
+          if (endRaw is DateTime) endsAt = endRaw;
+        }
+        if (pct == null || pct <= 0) continue;
+        if (!active) continue;
+        if (endsAt != null && endsAt.isBefore(now)) continue;
+        if (best == null || pct > best) best = pct;
+      }
+    }
+    if (best == null) {
+      final ie = product['is_event'];
+      final dp = product['discount_percent'];
+      final bool isEvent = ie == true || (ie is String && ie.toLowerCase() == 'true');
+      final int? pct = (dp is num) ? dp.toInt() : (dp is String ? int.tryParse(dp) : null);
+      if (isEvent && pct != null && pct > 0) best = pct;
+    }
+    return best;
+  }
+
+  String _formatTHB(num v) => (v % 1 == 0) ? '฿ ${v.toInt()}' : '฿ ${v.toStringAsFixed(2)}';
+
   @override
   Widget build(BuildContext context) {
     final name = (data['name'] ?? '').toString();
-    final price = data['price'];
+    final priceRaw = data['price'];
+    final num? priceNum = priceRaw is num ? priceRaw : num.tryParse('$priceRaw');
+    final double? price = priceNum?.toDouble();
+
     final category = (data['category'] ?? '').toString();
-    final urls =
-    _extractImageUrls(data['image_urls'] ?? data['imageurl'] ?? data['image_url']);
+    final urls = _extractImageUrls(data['image_urls']);
     final img = urls.isNotEmpty ? urls.first : null;
 
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
+    final int? bestPct = _bestActiveDiscountPercent(data);
+    final double? discounted =
+    (price != null && bestPct != null) ? (price * (1 - bestPct / 100)).clamp(0, double.infinity) : null;
+
+    final idRaw = data['id'];
+    final int? productId =
+    idRaw is int ? idRaw : (idRaw is num ? idRaw.toInt() : int.tryParse('$idRaw'));
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: BrandColors.pastel.withOpacity(.5)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          // TODO: navigate to your product detail/edit screen
+          if (productId == null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Cannot open product: missing id')),
+            );
+            return;
+          }
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ProductDetailScreen(
+                productId: productId,
+                initialData: {
+                  'id': productId,
+                  'name': name,
+                  'price': price,
+                  'image_urls': urls,
+                  'category': category,
+                  'best_discount_pct': bestPct,
+                  'discounted_price': discounted,
+                },
+              ),
+            ),
+          );
         },
+        onLongPress: onDelete,
         child: Stack(
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Image
                 AspectRatio(
                   aspectRatio: 1,
                   child: Stack(
@@ -294,7 +438,7 @@ class _MyProductCard extends StatelessWidget {
                       Positioned.fill(
                         child: img == null
                             ? Container(
-                          color: Colors.grey.shade200,
+                          color: Colors.white,
                           child: const Icon(Icons.image_not_supported_outlined,
                               color: Colors.grey),
                         )
@@ -306,74 +450,103 @@ class _MyProductCard extends StatelessWidget {
                           top: 8,
                           child: _CategoryValueBadge(text: category),
                         ),
+                      if (bestPct != null && bestPct > 0)
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: _DiscountBadge(text: '-$bestPct%'),
+                        ),
                     ],
                   ),
                 ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+
+                // Text
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1C1033),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      if (discounted != null && price != null) ...[
                         Text(
-                          name,
-                          maxLines: 2,
+                          _formatTHB(price),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            decoration: TextDecoration.lineThrough,
+                          ),
                         ),
-                        const Spacer(),
+                        const SizedBox(height: 2),
                         Text(
-                          price == null ? '' : '฿ ${price.toString()}',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                          _formatTHB(discounted),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: Colors.red, // red accent
+                          ),
                         ),
-                      ],
-                    ),
+                      ] else
+                        Text(
+                          price == null ? '' : _formatTHB(price),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: BrandColors.deep,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
             ),
 
-            // overflow menu
+            // Delete
             Positioned(
-              top: 6,
-              right: 6,
-              child: Material(
-                color: Colors.black.withOpacity(0.55),
-                borderRadius: BorderRadius.circular(10),
+              right: 8,
+              bottom: 8,
+              child: Tooltip(
+                message: 'Delete product',
                 child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
                   onTap: () async {
-                    final choice = await showMenu<String>(
+                    final ok = await showDialog<bool>(
                       context: context,
-                      position: const RelativeRect.fromLTRB(1000, 60, 12, 0),
-                      items: const [
-                        PopupMenuItem(
-                          value: 'edit',
-                          child: Row(
-                            children: [
-                              Icon(Icons.edit_outlined, size: 18),
-                              SizedBox(width: 8),
-                              Text('Edit'),
-                            ],
+                      builder: (_) => AlertDialog(
+                        title: const Text('Delete this product?'),
+                        content: const Text('This action cannot be undone.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                          FilledButton(
+                            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Delete'),
                           ),
-                        ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                              SizedBox(width: 8),
-                              Text('Delete', style: TextStyle(color: Colors.red)),
-                            ],
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     );
-                    if (choice == 'delete') onDelete();
+                    if (ok == true) onDelete();
                   },
-                  child: const Padding(
-                    padding: EdgeInsets.all(6.0),
-                    child: Icon(Icons.more_vert, size: 18, color: Colors.white),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.95),
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 6)],
+                    ),
+                    child: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
                   ),
                 ),
               ),
@@ -385,7 +558,7 @@ class _MyProductCard extends StatelessWidget {
   }
 }
 
-/* ---------------------------- CATEGORY BADGE ------------------------------- */
+/* ---------------------------- BADGES --------------------------------------- */
 
 class _CategoryValueBadge extends StatelessWidget {
   final String text;
@@ -396,16 +569,48 @@ class _CategoryValueBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.65),
-        borderRadius: BorderRadius.circular(8),
+        color: BrandColors.chipBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: BrandColors.pastel.withOpacity(.7)),
       ),
       child: Text(
         text,
         style: const TextStyle(
           color: Colors.white,
           fontSize: 11,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
           height: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
+class _DiscountBadge extends StatelessWidget {
+  final String text;
+  const _DiscountBadge({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    // Red percentage text with readable white chip + red outline
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 8),
+        ],
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.red,        // 🔴 discount percentage in red
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+          height: 1.0,
+          letterSpacing: 0.3,
         ),
       ),
     );
