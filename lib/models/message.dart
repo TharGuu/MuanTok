@@ -1,33 +1,43 @@
 // lib/models/message.dart
 
 class Message {
-  final String id;
-  final String content;
+  final int id;
+  final int roomId;
   final String senderId;
+  final String content; // Will still be used for text messages or as a caption
   final DateTime createdAt;
   final String senderFullName;
-  final String? senderAvatarUrl;
+  final String senderAvatarUrl;
+
+  // --- NEW FIELDS ---
+  final String type; // 'text', 'image', 'file', 'location'
+  final Map<String, dynamic>? metadata; // For URL, coordinates, etc.
 
   Message({
     required this.id,
-    required this.content,
+    required this.roomId,
     required this.senderId,
+    required this.content,
     required this.createdAt,
     required this.senderFullName,
-    this.senderAvatarUrl,
+    required this.senderAvatarUrl,
+    // --- NEW ---
+    this.type = 'text',
+    this.metadata,
   });
 
   factory Message.fromJson(Map<String, dynamic> map) {
-    // The 'sender' data comes from the join we did in the query.
-    final senderData = map['sender'] as Map<String, dynamic>?;
-
     return Message(
-      id: map['id'].toString(),
-      content: map['content'] as String,
-      senderId: map['sender_id'] as String,
+      id: map['id'],
+      roomId: map['room_id'],
+      senderId: map['sender_id'],
+      content: map['content'],
       createdAt: DateTime.parse(map['created_at']),
-      senderFullName: senderData?['full_name'] ?? 'Unknown User',
-      senderAvatarUrl: senderData?['avatar_url'] as String?,
+      senderFullName: map['sender']?['full_name'] ?? 'User',
+      senderAvatarUrl: map['sender']?['avatar_url'] ?? '',
+      // --- NEW ---
+      type: map['type'] ?? 'text',
+      metadata: map['metadata'] != null ? map['metadata'] as Map<String, dynamic> : null,
     );
   }
 }
