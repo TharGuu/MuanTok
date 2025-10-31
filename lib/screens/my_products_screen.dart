@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'product_detail_screen.dart';
+import 'profile_screen.dart';
 
 const String kProductImagesBucket = 'product-images';
 
@@ -213,6 +214,25 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
             centerTitle: false,
             backgroundColor: Colors.transparent,
             foregroundColor: Colors.white,
+
+            // ⬇️ force back button to open ProfileScreen
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () {
+                if (_uid.isNotEmpty) {
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (_) => ProfileScreen(userId: _uid),
+                    ),
+                  );
+                } else {
+                  // fallback if not signed in
+                  Navigator.of(context).maybePop();
+                }
+              },
+            ),
+
+
             title: const Text(
               'My Products',
               style: TextStyle(fontWeight: FontWeight.w700),
