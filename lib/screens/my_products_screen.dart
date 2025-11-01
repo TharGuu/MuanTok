@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'product_detail_screen.dart';
-import 'profile_screen.dart';
 
 const String kProductImagesBucket = 'product-images';
 
@@ -102,14 +101,11 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
       event: PostgresChangeEvent.update,
       schema: 'public',
       table: 'products',
-      filter: PostgresChangeFilterType.eq ==
-          PostgresChangeFilterType.eq // keep analyzer happy
-          ? PostgresChangeFilter(
+      filter: PostgresChangeFilter(
         type: PostgresChangeFilterType.eq,
         column: 'seller_id',
         value: _uid,
-      )
-          : null,
+      ),
       callback: (_) => _scheduleRefresh(),
     )
         .onPostgresChanges(
@@ -214,25 +210,11 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
             centerTitle: false,
             backgroundColor: Colors.transparent,
             foregroundColor: Colors.white,
-
-            // ⬇️ force back button to open ProfileScreen
+            // 👇 back only pops (no extra profile pushed)
             leading: IconButton(
               icon: const Icon(Icons.arrow_back),
-              onPressed: () {
-                if (_uid.isNotEmpty) {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (_) => ProfileScreen(userId: _uid),
-                    ),
-                  );
-                } else {
-                  // fallback if not signed in
-                  Navigator.of(context).maybePop();
-                }
-              },
+              onPressed: () => Navigator.of(context).pop(),
             ),
-
-
             title: const Text(
               'My Products',
               style: TextStyle(fontWeight: FontWeight.w700),
@@ -612,21 +594,20 @@ class _DiscountBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Red percentage text with readable white chip + red outline
+    // Red filled pill with white text for percentage
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.red,                // <-- solid red fill
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.red),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 8),
+          BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 8),
         ],
       ),
       child: Text(
         text,
         style: const TextStyle(
-          color: Colors.red,        // 🔴 discount percentage in red
+          color: Colors.white,           // <-- white text
           fontSize: 11,
           fontWeight: FontWeight.w900,
           height: 1.0,
