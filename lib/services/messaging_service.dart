@@ -1,6 +1,7 @@
 // lib/services/messaging_service.dart
 
 import 'dart:async';
+import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/chat_room.dart';
 import '../models/message.dart'; // We will create this model next
@@ -31,17 +32,20 @@ class MessagingService {
   }
 
   /// Sends a message to a specific chat room.
-  Future<void> sendMessage({required int roomId, required String content}) async {
+  Future<void> sendMessage({
+    required int roomId,
+    required String content,
+    String type = 'text',
+    Map<String, String>? metadata,
+  }) async {
     final senderId = _supabase.auth.currentUser!.id;
-
-    final message = {
+    await _supabase.from('messages').insert({
       'room_id': roomId,
       'sender_id': senderId,
       'content': content,
-    };
-
-    // The RLS policies we created will ensure the user is allowed to do this.
-    await _supabase.from('messages').insert(message);
+      'type': type,       // NEW
+      'metadata': metadata, // NEW
+    });
   }
 
   /// Listens for new messages in a specific room using Supabase Realtime.
@@ -105,5 +109,22 @@ class MessagingService {
       // Rethrow the exception to be handled by the UI
       throw Exception('Failed to fetch chat rooms: $e');
     }
+  }
+
+  Future<String> uploadFile({
+    required int roomId,
+    required File file,
+  }) async {
+    final fileExtension = file.path.split('.').last;
+    final fileName = '${DateTime.now().toIso8601String()}.$fileExtension';
+    final filePath = 'rooms/$roomId/$fileName';
+
+    // Upload file to Supabase Storage
+    await _supabase.storage.from('chat_attachments').upload(filePath, file);
+
+    // Get the public URL of the uploaded file
+    final fileUrl = _supabase.storage.from('chat_attachments').getPublicUrl(filePath);
+
+    return fileUrl;
   }
 }
