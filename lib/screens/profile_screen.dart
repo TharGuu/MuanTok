@@ -387,7 +387,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 if (_isSelf) ...[
                   _SectionHeader(title: 'Account Actions'),
                   _ActionTile(
-                    title: 'Voucher',
+                    title: 'Coupons',
                     icon: Icons.card_giftcard_outlined,
                     onTap: () {
                       Navigator.push(

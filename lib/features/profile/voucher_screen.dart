@@ -42,7 +42,7 @@ class _VoucherScreenState extends State<VoucherScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Vouchers',
+        title: const Text('My Coupons',
             style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         centerTitle: true,
         backgroundColor: Colors.white,
@@ -86,13 +86,13 @@ class _VoucherScreenState extends State<VoucherScreen>
               children: [
                 _VoucherList(
                   vouchers: available,
-                  emptyText: 'No available vouchers yet.',
+                  emptyText: 'No available coupons yet.',
                   primaryPurple: primaryPurple,
                   showApply: true,
                 ),
                 _VoucherList(
                   vouchers: usedExpired,
-                  emptyText: 'No used or expired vouchers.',
+                  emptyText: 'No used or expired coupons.',
                   primaryPurple: primaryPurple,
                   showApply: false,
                 ),
