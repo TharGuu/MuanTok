@@ -1,93 +1,112 @@
 // lib/services/card_service.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-final _sb = Supabase.instance.client;
-
-/// Lightweight card model (demo only — use processor tokens in production).
 class PaymentCardLite {
   final int id;
   final String brand;
   final String last4;
-  final String holder;
   final int expMonth;
   final int expYear;
+  final String holder;
 
   PaymentCardLite({
     required this.id,
     required this.brand,
     required this.last4,
-    required this.holder,
     required this.expMonth,
     required this.expYear,
+    required this.holder,
   });
 
   factory PaymentCardLite.fromMap(Map<String, dynamic> m) => PaymentCardLite(
-    id: (m['id'] as num).toInt(),
-    brand: (m['brand'] ?? 'Card').toString(),
-    last4: (m['last4'] ?? '0000').toString(),
+    id: m['id'] is int ? m['id'] as int : int.parse('${m['id']}'),
+    brand: (m['brand'] ?? '').toString(),
+    last4: (m['last4'] ?? '').toString(),
+    expMonth: m['exp_month'] is int
+        ? m['exp_month'] as int
+        : int.tryParse('${m['exp_month']}') ?? 0,
+    expYear: m['exp_year'] is int
+        ? m['exp_year'] as int
+        : int.tryParse('${m['exp_year']}') ?? 0,
     holder: (m['holder'] ?? '').toString(),
-    expMonth: (m['exp_month'] as num).toInt(),
-    expYear: (m['exp_year'] as num).toInt(),
   );
 }
 
 class CardService {
-  static String _requireUid() {
-    final uid = _sb.auth.currentUser?.id;
-    if (uid == null) throw StateError('Not signed in');
-    return uid;
-  }
+  static SupabaseClient get _sb => Supabase.instance.client;
 
+  /// List current user's cards (not soft-deleted).
   static Future<List<PaymentCardLite>> listMyCards() async {
-    final uid = _requireUid();
+    if (_sb.auth.currentUser == null) return [];
     final rows = await _sb
         .from('payment_cards')
-        .select('id, brand, last4, holder, exp_month, exp_year, deleted_at')
-        .eq('user_id', uid)
-        .isFilter('deleted_at', null)
-        .order('id', ascending: false);
-    return (rows as List)
-        .cast<Map<String, dynamic>>()
-        .map(PaymentCardLite.fromMap)
-        .toList();
+        .select('id, brand, last4, exp_month, exp_year, holder, deleted_at')
+        .order('created_at', ascending: false);
+
+    final list = (rows as List).cast<Map<String, dynamic>>();
+    final filtered = list.where((m) => m['deleted_at'] == null).toList();
+    return filtered.map(PaymentCardLite.fromMap).toList();
   }
 
-  static Future<PaymentCardLite> addCard({
+  /// Add a new card.
+  /// `brand` is optional; we auto-detect from `number` if not provided.
+  static Future<void> addCard({
     required String holder,
-    required String number, // DEMO ONLY
+    String? brand,              // <- now optional
+    required String number,     // PAN (spaces are fine)
     required int expMonth,
     required int expYear,
   }) async {
-    final uid = _requireUid();
-
-    String brandOf(String n) {
-      if (n.startsWith('4')) return 'Visa';
-      if (RegExp(r'^(5[1-5])').hasMatch(n)) return 'Mastercard';
-      if (RegExp(r'^(34|37)').hasMatch(n)) return 'Amex';
-      return 'Card';
+    if (_sb.auth.currentUser == null) {
+      throw 'Not signed in';
     }
 
-    final sanitized = number.replaceAll(RegExp(r'[\s-]'), '');
-    final last4 = sanitized.length >= 4 ? sanitized.substring(sanitized.length - 4) : '0000';
+    final digits = number.replaceAll(RegExp(r'\s+'), '');
+    if (digits.length < 12) throw 'Card number too short';
+    final last4 = digits.substring(digits.length - 4);
 
-    final inserted = await _sb.from('payment_cards').insert({
-      'user_id': uid,
-      'brand': brandOf(sanitized),
-      'last4': last4,
+    final normalizedBrand =
+    (brand == null || brand.trim().isEmpty) ? _detectBrand(digits) : brand.toLowerCase();
+
+    final payload = {
       'holder': holder,
+      'brand': normalizedBrand,
+      'last4': last4,
       'exp_month': expMonth,
       'exp_year': expYear,
-    }).select('id, brand, last4, holder, exp_month, exp_year').single();
+      // If you don't have a trigger to set user_id, uncomment:
+      // 'user_id': _sb.auth.currentUser!.id,
+    };
 
-    return PaymentCardLite.fromMap(inserted as Map<String, dynamic>);
+    await _sb.from('payment_cards').insert(payload);
   }
 
-  static Future<void> deleteCard(int id) async {
-    final uid = _requireUid();
-    await _sb
-        .from('payment_cards')
-        .update({'deleted_at': DateTime.now().toIso8601String()})
-        .eq('id', id)
-        .eq('user_id', uid);
+  /// Hard delete (requires DELETE policy). If you use soft delete, swap to update deleted_at.
+  static Future<void> deleteCard(int cardId) async {
+    if (_sb.auth.currentUser == null) {
+      throw 'Not signed in';
+    }
+    await _sb.from('payment_cards').delete().match({'id': cardId});
+
+    // Soft delete alternative:
+    // await _sb.from('payment_cards')
+    //   .update({'deleted_at': DateTime.now().toIso8601String()})
+    //   .match({'id': cardId});
+  }
+
+  /// Basic BIN pattern detection.
+  static String _detectBrand(String digits) {
+    // Order matters (more specific first)
+    final d = digits;
+    if (RegExp(r'^(34|37)\d{13}$').hasMatch(d)) return 'amex';
+    if (RegExp(r'^(62|81)\d{14,17}$').hasMatch(d)) return 'unionpay';
+    if (RegExp(r'^(6011|65|64[4-9])\d{12,15}$').hasMatch(d)) return 'discover';
+    if (RegExp(r'^(352[8-9]|35[3-8]\d)\d{12}$').hasMatch(d)) return 'jcb';
+    if (RegExp(r'^(30[0-5]|309|36|38|39)\d{12}$').hasMatch(d)) return 'diners';
+    if (RegExp(r'^(5[1-5]\d{14}|2(2[2-9]\d{12}|[3-6]\d{13}|7[01]\d{12}|720\d{12}))$').hasMatch(d)) {
+      return 'mastercard';
+    }
+    if (RegExp(r'^4\d{12}(\d{3})?(\d{3})?$').hasMatch(d)) return 'visa';
+    return 'card';
   }
 }
