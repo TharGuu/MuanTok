@@ -371,7 +371,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
 
                   _ActionTile(
-                    title: 'Voucher',
+                    title: 'Coupons',
                     icon: Icons.card_giftcard_outlined,
                     onTap: () {
                       Navigator.push(

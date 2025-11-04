@@ -54,12 +54,33 @@ class _VoucherScreenState extends State<VoucherScreen> {
 
   @override
   Widget build(BuildContext context) {
+<<<<<<< HEAD
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           colors: [kBgTop, kBgBottom],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
+=======
+    final _ = _sb.auth.currentUser != null; // isSelf not used but could be
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Coupons',
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        centerTitle: true,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: primaryPurple,
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: primaryPurple,
+          tabs: const [
+            Tab(text: 'Available'),
+            Tab(text: 'Used / Expired'),
+          ],
+>>>>>>> a47fc57d44d340f0ace8e6089c81a288485841a8
         ),
       ),
       child: DefaultTabController(
@@ -193,6 +214,7 @@ class _AvailableCouponsTabState extends State<_AvailableCouponsTab> {
           if (snap.hasError) {
             return ListView(
               children: [
+<<<<<<< HEAD
                 const SizedBox(height: 24),
                 _ErrorBox('Failed to load coupons: ${snap.error}'),
               ],
@@ -207,6 +229,19 @@ class _AvailableCouponsTabState extends State<_AvailableCouponsTab> {
                 _EmptyState(
                   title: 'No coupons available',
                   caption: 'Please check back later.',
+=======
+                _VoucherList(
+                  vouchers: available,
+                  emptyText: 'No available coupons yet.',
+                  primaryPurple: primaryPurple,
+                  showApply: true,
+                ),
+                _VoucherList(
+                  vouchers: usedExpired,
+                  emptyText: 'No used or expired coupons.',
+                  primaryPurple: primaryPurple,
+                  showApply: false,
+>>>>>>> a47fc57d44d340f0ace8e6089c81a288485841a8
                 ),
               ],
             );
