@@ -8,20 +8,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/supabase_service.dart';
+import '../services/voucher_service.dart'; // <-- NEW: live coupons service
 import '../features/profile/voucher_screen.dart';
 import 'promotion_screen.dart';
 import 'product_detail_screen.dart';
 import 'favourite_screen.dart';
 import 'cart_screen.dart';
 
-
-
 void _openFavourites(BuildContext context) {
   Navigator.of(context).push(
     MaterialPageRoute(builder: (_) => const FavouriteScreen()),
   );
 }
-
 
 /* -------------------------------------------------------------------------- */
 /*                               CATEGORY MODEL                               */
@@ -175,13 +173,8 @@ class _ShopScreenState extends State<ShopScreen> {
                         },
                       ),
                     ],
-
-
-                    // if you ALSO want icons in Sell tab later,
-                    // you can add an `else` with different icons here.
                   ],
                 ),
-
               ],
             ),
           ),
@@ -230,18 +223,6 @@ class _BuyHomeState extends State<_BuyHome> {
   String? _error;
   List<Map<String, dynamic>> _recommended = [];
 
-  // coupons demo (static placeholders)
-  final List<_Coupon> _coupons = [
-    _Coupon('c1', '฿50 OFF', 'Min. spend ฿300'),
-    _Coupon('c2', 'Free Ship', 'Nationwide'),
-    _Coupon('c3', '10% OFF', 'Cap ฿100'),
-    _Coupon('c4', 'Buy 1 Get 1', 'Selected items'),
-  ];
-
-  final Set<String> _claimedIds = <String>{};
-  List<_Coupon> get _visibleCoupons =>
-      _coupons.where((c) => !_claimedIds.contains(c.id)).toList();
-
   RealtimeChannel? _channel;
   StreamSubscription<void>? _debounce;
 
@@ -250,7 +231,6 @@ class _BuyHomeState extends State<_BuyHome> {
     super.initState();
     _fetchRecommended();
     _subscribeRealtime();
-    _loadClaimedCouponIds();
   }
 
   @override
@@ -258,34 +238,6 @@ class _BuyHomeState extends State<_BuyHome> {
     _channel?.unsubscribe();
     _debounce?.cancel();
     super.dispose();
-  }
-
-  Future<void> _loadClaimedCouponIds() async {
-    try {
-      final sb = Supabase.instance.client;
-      final uid = sb.auth.currentUser?.id;
-      if (uid == null || uid.isEmpty) return;
-
-      final rows = await sb
-          .from('user_coupons')
-          .select('coupon_id')
-          .eq('user_id', uid);
-
-      final ids = <String>{};
-      for (final r in (rows as List)) {
-        final v = r['coupon_id'];
-        if (v != null) ids.add(v.toString());
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _claimedIds
-          ..clear()
-          ..addAll(ids);
-      });
-    } catch (_) {
-      // silent fail
-    }
   }
 
   Future<void> _fetchRecommended() async {
@@ -364,96 +316,6 @@ class _BuyHomeState extends State<_BuyHome> {
     );
   }
 
-  Future<void> _ensureCouponExistsOnServer(_Coupon c) async {
-    final sb = Supabase.instance.client;
-    final discountType = c.title.contains('%') ? 'percent' : 'amount';
-    final discountValue = _parseDiscountValue(c.title);
-
-    await sb.from('coupons').upsert(
-      {
-        'id': c.id,
-        'title': c.title,
-        'description': c.subtitle,
-        'code': c.id,
-        'image_url': null,
-        'discount_type': discountType,
-        'discount_value': discountValue,
-        'min_spend': null,
-        'expires_at': null,
-        'is_active': true,
-      },
-      onConflict: 'id',
-    );
-  }
-
-  num _parseDiscountValue(String title) {
-    final percent = RegExp(r'(\d+)\s*%').firstMatch(title);
-    if (percent != null) return num.parse(percent.group(1)!);
-    final amount = RegExp(r'฿\s*(\d+)').firstMatch(title);
-    if (amount != null) return num.parse(amount.group(1)!);
-    return 0;
-  }
-
-  Future<void> _claimCouponToServer(_Coupon c) async {
-    final sb = Supabase.instance.client;
-    final uid = sb.auth.currentUser?.id;
-    if (uid == null || uid.isEmpty) {
-      throw 'Please sign in to claim coupons.';
-    }
-
-    await _ensureCouponExistsOnServer(c);
-
-    final existing = await sb
-        .from('user_coupons')
-        .select('id')
-        .eq('user_id', uid)
-        .eq('coupon_id', c.id)
-        .limit(1);
-
-    if (existing is List && existing.isNotEmpty) return;
-
-    await sb.from('user_coupons').insert({
-      'user_id': uid,
-      'coupon_id': c.id,
-    });
-  }
-
-  void _claimCoupon(_Coupon coupon) async {
-    if (_claimedIds.contains(coupon.id)) return;
-    try {
-      await _claimCouponToServer(coupon);
-
-      if (!mounted) return;
-      setState(() {
-        coupon.claimed = true;
-        _claimedIds.add(coupon.id);
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🎉 Coupon claimed: ${coupon.title}'),
-          action: SnackBarAction(
-            label: 'View',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                  const VoucherScreen(initialTab: VoucherTab.available),
-                ),
-              );
-            },
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Claim failed: $e')),
-      );
-    }
-  }
-
   // pick which asset banner to show for each event
   String _bannerForEvent(EventInfo ev) {
     final lower = ev.name.toLowerCase();
@@ -461,13 +323,11 @@ class _BuyHomeState extends State<_BuyHome> {
     if (lower.contains('promo') || lower.contains('promotion')) {
       return 'assets/banners/promotion.png';
     }
-
     if (lower.contains('christmas') ||
         lower.contains('xmas') ||
         lower.contains('holiday')) {
       return 'assets/banners/christmas_sale.png';
     }
-
     return 'assets/banners/default_event.png';
   }
 
@@ -476,7 +336,6 @@ class _BuyHomeState extends State<_BuyHome> {
     return RefreshIndicator(
       onRefresh: () async {
         await _fetchRecommended();
-        await _loadClaimedCouponIds();
       },
       child: ListView(
         padding: const EdgeInsets.only(bottom: 24),
@@ -507,7 +366,7 @@ class _BuyHomeState extends State<_BuyHome> {
 
           const SizedBox(height: 16),
 
-          // Coupons
+          // Coupons (LIVE from DB, no writes to coupons)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
@@ -519,49 +378,7 @@ class _BuyHomeState extends State<_BuyHome> {
             ),
           ),
           const SizedBox(height: 8),
-
-          if (_visibleCoupons.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                height: 110,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: Text(
-                  'No coupons available',
-                  style: TextStyle(
-                    color: Colors.grey.shade700,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            )
-          else
-            SizedBox(
-              height: 130, // give a bit more breathing space
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 4), // prevent pixel overflow
-                child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  itemCount: _visibleCoupons.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
-                  itemBuilder: (_, i) => Align(
-                    alignment: Alignment.topCenter, // ensures cards stay inside
-                    child: _CouponCard(
-                      coupon: _visibleCoupons[i],
-                      onClaim: () => _claimCoupon(_visibleCoupons[i]),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
+          const CouponsSection(), // <-- NEW live section
 
           const SizedBox(height: 16),
 
@@ -699,8 +516,7 @@ class _BuyHomeState extends State<_BuyHome> {
             )
           else if (_error != null)
             Padding(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Text(
                 'Error: $_error',
                 style: const TextStyle(color: Colors.red),
@@ -962,8 +778,7 @@ class _ProductCard extends StatelessWidget {
     final num discounted =
     hasDiscount ? (priceRaw * (100 - discountPercent)) / 100 : priceRaw;
 
-    final sellerId =
-    (data['seller_id'] ?? data['sellerId'] ?? '').toString();
+    final sellerId = (data['seller_id'] ?? data['sellerId'] ?? '').toString();
 
     final Map<String, dynamic>? sellerMap =
         (data['seller'] is Map
@@ -996,7 +811,6 @@ class _ProductCard extends StatelessWidget {
               ),
             ),
           );
-          // TODO: go to details
         },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1079,9 +893,7 @@ class _ProductCard extends StatelessWidget {
                     ],
                   )
                       : Text(
-                    priceRaw == 0
-                        ? ''
-                        : '฿ ${_fmtBaht(priceRaw)}',
+                    priceRaw == 0 ? '' : '฿ ${_fmtBaht(priceRaw)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1316,7 +1128,6 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           tooltip: 'Back',
@@ -1358,12 +1169,9 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
                 runSpacing: 8,
                 children: [
                   _sortChip(_AllSort.newest, 'Newest'),
-                  _sortChip(_AllSort.priceLowHigh,
-                      'Price: Low → High'),
-                  _sortChip(_AllSort.priceHighLow,
-                      'Price: High → Low'),
-                  _sortChip(_AllSort.ratingHighLow,
-                      'Rating: High → Low'),
+                  _sortChip(_AllSort.priceLowHigh, 'Price: Low → High'),
+                  _sortChip(_AllSort.priceHighLow, 'Price: High → Low'),
+                  _sortChip(_AllSort.ratingHighLow, 'Rating: High → Low'),
                 ],
               ),
             ),
@@ -1373,8 +1181,7 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
                 horizontal: 16,
                 vertical: 24,
               ),
-              child: Center(
-                  child: Text('No products yet.')),
+              child: Center(child: Text('No products yet.')),
             )
                 : _ProductGrid(products: _items),
           ],
@@ -1598,8 +1405,7 @@ class _SellFormState extends State<SellForm> {
         final discountPct = entry.value;
 
         debugPrint(
-          'attachProductToEvent -> product $productId '
-              'event $eventId discountPct $discountPct',
+          'attachProductToEvent -> product $productId event $eventId discountPct $discountPct',
         );
 
         await SupabaseService.attachProductToEvent(
@@ -1654,8 +1460,7 @@ class _SellFormState extends State<SellForm> {
                 children: [
                   const Text(
                     'Photos',
-                    style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                   const Spacer(),
                   TextButton.icon(
@@ -1692,8 +1497,7 @@ class _SellFormState extends State<SellForm> {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: _images.length,
-                  gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
                     mainAxisSpacing: 8,
                     crossAxisSpacing: 8,
@@ -1720,9 +1524,8 @@ class _SellFormState extends State<SellForm> {
               _LightInput(
                 controller: _nameCtrl,
                 label: 'Product name',
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Product name is required'
-                    : null,
+                validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Product name is required' : null,
               ),
               const SizedBox(height: 12),
 
@@ -1731,9 +1534,8 @@ class _SellFormState extends State<SellForm> {
                 controller: _descCtrl,
                 label: 'Description',
                 maxLines: 4,
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Description is required'
-                    : null,
+                validator: (v) =>
+                (v == null || v.trim().isEmpty) ? 'Description is required' : null,
               ),
               const SizedBox(height: 12),
 
@@ -1741,18 +1543,14 @@ class _SellFormState extends State<SellForm> {
               _LightDropdown(
                 value: _category == null
                     ? null
-                    : _categories
-                    .firstWhere((c) => c.key == _category)
-                    .label,
+                    : _categories.firstWhere((c) => c.key == _category).label,
                 items: _categories.map((c) => c.label).toList(),
                 label: 'Category',
                 onChanged: (val) {
-                  final found =
-                  _categories.firstWhere((c) => c.label == val);
+                  final found = _categories.firstWhere((c) => c.label == val);
                   setState(() => _category = found.key);
                 },
-                validator: (v) =>
-                (v == null || v.isEmpty) ? 'Select a category' : null,
+                validator: (v) => (v == null || v.isEmpty) ? 'Select a category' : null,
               ),
               const SizedBox(height: 12),
 
@@ -1833,8 +1631,7 @@ class _SellFormState extends State<SellForm> {
                             onChanged: (checked) {
                               setState(() {
                                 if (checked == true) {
-                                  _selectedEvents.putIfAbsent(
-                                      ev.id, () => 0);
+                                  _selectedEvents.putIfAbsent(ev.id, () => 0);
                                 } else {
                                   _selectedEvents.remove(ev.id);
                                 }
@@ -1848,8 +1645,7 @@ class _SellFormState extends State<SellForm> {
                                 // event name
                                 Text(
                                   ev.name,
-                                  style:
-                                  theme.textTheme.bodyMedium?.copyWith(
+                                  style: theme.textTheme.bodyMedium?.copyWith(
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -1858,8 +1654,7 @@ class _SellFormState extends State<SellForm> {
                                 if (ev.endsAtDisplay.isNotEmpty)
                                   Text(
                                     'Ends ${ev.endsAtDisplay}',
-                                    style: theme.textTheme.bodySmall
-                                        ?.copyWith(
+                                    style: theme.textTheme.bodySmall?.copyWith(
                                       color: Colors.grey[600],
                                       fontSize: 12,
                                     ),
@@ -1874,30 +1669,22 @@ class _SellFormState extends State<SellForm> {
                                         width: 110,
                                         child: TextFormField(
                                           initialValue:
-                                          _selectedEvents[ev.id]
-                                              ?.toString() ??
+                                          _selectedEvents[ev.id]?.toString() ??
                                               '0',
-                                          keyboardType:
-                                          TextInputType.number,
+                                          keyboardType: TextInputType.number,
                                           inputFormatters: [
-                                            FilteringTextInputFormatter
-                                                .digitsOnly,
+                                            FilteringTextInputFormatter.digitsOnly,
                                           ],
-                                          decoration:
-                                          const InputDecoration(
+                                          decoration: const InputDecoration(
                                             isDense: true,
                                             labelText: 'Discount (%)',
-                                            border:
-                                            OutlineInputBorder(),
+                                            border: OutlineInputBorder(),
                                           ),
                                           onChanged: (val) {
-                                            final parsed =
-                                                int.tryParse(val) ??
-                                                    0;
+                                            final parsed = int.tryParse(val) ?? 0;
                                             setState(() {
                                               _selectedEvents[ev.id] =
-                                                  parsed.clamp(
-                                                      0, 100);
+                                                  parsed.clamp(0, 100);
                                             });
                                           },
                                         ),
@@ -1926,19 +1713,14 @@ class _SellFormState extends State<SellForm> {
                       ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                    ),
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   )
                       : const Icon(Icons.publish_outlined),
-                  label: Text(
-                    _submitting ? 'Publishing...' : 'Publish',
-                  ),
+                  label: Text(_submitting ? 'Publishing...' : 'Publish'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.black,
                     foregroundColor: Colors.white,
-                    padding:
-                    const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
@@ -1998,8 +1780,7 @@ class _FullscreenGalleryState extends State<FullscreenGallery> {
               top: 8,
               left: 8,
               child: IconButton(
-                icon: const Icon(Icons.close,
-                    color: Colors.white),
+                icon: const Icon(Icons.close, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
             ),
@@ -2019,8 +1800,7 @@ class _CategoryValueBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.65),
         borderRadius: BorderRadius.circular(8),
@@ -2045,8 +1825,7 @@ class _DiscountBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.red.shade600,
         borderRadius: BorderRadius.circular(8),
@@ -2100,10 +1879,8 @@ class _SellerNameState extends State<_SellerName> {
 
       if (rows is List && rows.isNotEmpty) {
         final r = rows.first as Map<String, dynamic>;
-        final fullName = (r['full_name'] ??
-            r['username'] ??
-            r['name'] ??
-            'Unknown seller')
+        final fullName =
+        (r['full_name'] ?? r['username'] ?? r['name'] ?? 'Unknown seller')
             .toString();
         _cache[widget.sellerId] = fullName;
         return fullName;
@@ -2136,97 +1913,202 @@ class _SellerNameState extends State<_SellerName> {
   }
 }
 
-/* ------------------------------- COUPON UI -------------------------------- */
+/* ----------------------- LIVE COUPONS UI (Lucid Purple, no code pill) ----------------------- */
 
-class _Coupon {
-  final String id;
-  final String title;
-  final String subtitle;
-  bool claimed;
-  _Coupon(this.id, this.title, this.subtitle, {this.claimed = false});
+class CouponsSection extends StatefulWidget {
+  const CouponsSection({super.key});
+  @override
+  State<CouponsSection> createState() => _CouponsSectionState();
 }
 
-class _CouponCard extends StatelessWidget {
-  final _Coupon coupon;
-  final VoidCallback onClaim;
+/* local tokens */
+const _lcPrimary = Color(0xFF7C3AED);
+const _lcPrimary2 = Color(0xFF9B8AFB);
+const _lcMuted   = Color(0xFF6B7280);
+const _lcDanger  = Color(0xFFE11D48);
 
-  const _CouponCard({
-    required this.coupon,
-    required this.onClaim,
-  });
+BoxDecoration _lcGlass([double r = 12]) => BoxDecoration(
+  color: Colors.white,
+  borderRadius: BorderRadius.circular(r),
+  border: Border.all(color: const Color(0x11000000)),
+  boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 6))],
+);
+
+class _CouponsSectionState extends State<CouponsSection> {
+  late Future<List<Map<String, dynamic>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _future = VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
+    });
+  }
+
+  String _subtitle(Map<String, dynamic> c) {
+    final type = (c['discount_type'] ?? '').toString();
+    final val  = c['discount_value'];
+    if (type == 'percent') {
+      final pct = int.tryParse('$val') ?? 0;
+      return 'Save $pct%';
+    }
+    if (type == 'amount') {
+      final amt = num.tryParse('$val') ?? 0;
+      return 'Save ฿ ${_fmtBaht(amt)}';
+    }
+    return (c['description'] ?? 'Coupon').toString();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final claimed = coupon.claimed;
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _future,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Padding(
+            padding: EdgeInsets.all(12),
+            child: Center(child: CircularProgressIndicator(color: _lcPrimary)),
+          );
+        }
 
-    return Container(
-      width: 220,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: claimed ? Colors.green.shade50 : Colors.orange.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color:
-          claimed ? Colors.green.shade200 : Colors.orange.shade200,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                claimed
-                    ? Icons.verified_rounded
-                    : Icons.local_offer_rounded,
-                color: claimed ? Colors.green : Colors.orange,
+        if (snap.hasError) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              height: 120,
+              alignment: Alignment.center,
+              decoration: _lcGlass(12).copyWith(
+                border: Border.all(color: const Color(0x26E11D48)),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  coupon.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+              child: Text(
+                'Failed to load coupons:\n${snap.error}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: _lcDanger),
               ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            coupon.subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.black54,
             ),
-          ),
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: claimed ? null : onClaim,
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                claimed ? Colors.green.shade600 : Colors.black,
-                foregroundColor: Colors.white,
-                padding:
-                const EdgeInsets.symmetric(vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: Text(claimed ? 'Claimed' : 'Claim'),
+          );
+        }
+
+        final coupons = snap.data ?? const [];
+        if (coupons.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              height: 120,
+              alignment: Alignment.center,
+              decoration: _lcGlass(12),
+              child: const Text('No coupons available',
+                  style: TextStyle(color: _lcMuted, fontWeight: FontWeight.w600)),
             ),
+          );
+        }
+
+        return SizedBox(
+          height: 140,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            scrollDirection: Axis.horizontal,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemCount: coupons.length,
+            itemBuilder: (context, i) {
+              final c     = coupons[i];
+              final title = (c['title'] ?? 'Coupon').toString();
+              final code  = (c['code']  ?? '').toString(); // still used internally
+
+              return Container(
+                width: 240,
+                padding: const EdgeInsets.all(12),
+                decoration: _lcGlass(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title row
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(colors: [_lcPrimary, _lcPrimary2]),
+                          ),
+                          child: const Icon(Icons.local_offer_rounded, color: Colors.white, size: 16),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w800)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Subtitle only (no code chip)
+                    Text(
+                      _subtitle(c),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: _lcMuted),
+                    ),
+
+                    const Spacer(),
+
+                    // Claim button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          try {
+                            await VoucherService.claimCouponByCode(code);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('🎉 Coupon claimed: $title')),
+                            );
+                            await _refresh();
+                          } on StateError catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(SnackBar(content: Text(e.message)));
+                          } on PostgrestException catch (e) {
+                            if (!mounted) return;
+                            final msg = (e.code == '23505')
+                                ? 'You already claimed this coupon.'
+                                : (e.code == '42501')
+                                ? 'Permission denied.'
+                                : (e.message ?? 'Cannot claim coupon.');
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(SnackBar(content: Text(msg)));
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(SnackBar(content: Text('Error: $e')));
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          foregroundColor: Colors.white,
+                          backgroundColor: _lcPrimary,
+                        ),
+                        child: const Text('Claim'),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
+
 
 /* ------------------------------ INPUT WIDGETS ------------------------------ */
 
@@ -2300,18 +2182,15 @@ class _LightDropdown extends FormField<String> {
           labelStyle: TextStyle(color: Colors.grey.shade700),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide:
-            BorderSide(color: Colors.grey.shade300),
+            borderSide: BorderSide(color: Colors.grey.shade300),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide:
-            BorderSide(color: Colors.grey.shade600),
+            borderSide: BorderSide(color: Colors.grey.shade600),
           ),
           errorBorder: const OutlineInputBorder(
             borderRadius: BorderRadius.all(Radius.circular(12)),
-            borderSide:
-            BorderSide(color: Colors.redAccent),
+            borderSide: BorderSide(color: Colors.redAccent),
           ),
         ),
         child: DropdownButtonHideUnderline(
@@ -2338,14 +2217,6 @@ class _LightDropdown extends FormField<String> {
 }
 
 /* ---------------------------- PRODUCT SEARCH ---------------------------- */
-/*
-Goal:
-- When search opens and query is empty: show ALL products.
-- When user types: show filtered list.
-- Show discount/non-discount all the same (ProductCard).
-
-We use .filter('name','ilike','%text%') instead of .ilike() for sdk 2.5.0.
-*/
 
 class ProductSearchDelegate extends SearchDelegate<String?> {
   final _sb = Supabase.instance.client;
@@ -2426,7 +2297,7 @@ class _SearchList extends StatelessWidget {
       return name.contains(q);
     }).toList();
 
-    // 4. Normalize seller for safety (same helper logic you use elsewhere)
+    // 4. Normalize seller for safety
     for (final p in filtered) {
       final sellerMap = p['seller'];
       if (sellerMap == null) {
@@ -2444,7 +2315,6 @@ class _SearchList extends StatelessWidget {
     }
 
     // 5. 🔥 Pull best discount for each product from product_events
-    //    and inject it so _ProductCard can show red discounted price.
     final productIds =
     filtered.map((p) => p['id']).whereType<int>().toList();
 
@@ -2482,7 +2352,6 @@ class _SearchList extends StatelessWidget {
     );
   }
 }
-
 
 class _SearchEmptyState extends StatelessWidget {
   final String message;

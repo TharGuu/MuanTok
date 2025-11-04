@@ -1,10 +1,39 @@
 // lib/features/profile/voucher_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../models/coupon.dart';
 import '../../services/voucher_service.dart';
 
-enum VoucherTab { available, usedExpired }
+/* ------------------------------ Lucid Theme ------------------------------ */
+
+const kPrimary = Color(0xFF7C3AED); // Purple core
+const kPrimary2 = Color(0xFF9B8AFB);
+const kPrimaryLiteA = Color(0xFFF2ECFF);
+const kPrimaryLiteB = Color(0xFFEDE7FF);
+const kText = Color(0xFF1F2937);
+const kMuted = Color(0xFF6B7280);
+const kBgTop = Color(0xFFF8F5FF);
+const kBgBottom = Color(0xFFFDFBFF);
+const kGlass = Color(0xFFFFFFFF);
+
+BoxDecoration glassCard([double radius = 16]) => BoxDecoration(
+  color: kGlass.withOpacity(.92),
+  borderRadius: BorderRadius.circular(radius),
+  border: Border.all(color: const Color(0x11000000)),
+  boxShadow: const [
+    BoxShadow(color: Color(0x22000000), blurRadius: 12, offset: Offset(0, 6)),
+  ],
+);
+
+TextStyle sectionTitle(BuildContext c) =>
+    Theme.of(c).textTheme.titleMedium!.copyWith(
+      fontWeight: FontWeight.w900,
+      letterSpacing: .2,
+      color: kText,
+    );
+
+/* ------------------------------------------------------------------------ */
+
+enum VoucherTab { available, claimed }
 
 class VoucherScreen extends StatefulWidget {
   final VoucherTab initialTab;
@@ -14,90 +43,218 @@ class VoucherScreen extends StatefulWidget {
   State<VoucherScreen> createState() => _VoucherScreenState();
 }
 
-class _VoucherScreenState extends State<VoucherScreen>
-    with SingleTickerProviderStateMixin {
-  final VoucherService _voucherService = VoucherService();
-  final _sb = Supabase.instance.client;
-
-  late Future<List<Coupon>> _future;
-  late TabController _tabController;
-
-  Color get primaryPurple => const Color(0xFF673ab7);
+class _VoucherScreenState extends State<VoucherScreen> {
+  late int _initialIndex;
 
   @override
   void initState() {
     super.initState();
-    _future = _voucherService.fetchMyClaimedCoupons();
-    _tabController =
-        TabController(length: 2, vsync: this, initialIndex: widget.initialTab.index);
-  }
-
-  Future<void> _refresh() async {
-    setState(() => _future = _voucherService.fetchMyClaimedCoupons());
+    _initialIndex = widget.initialTab == VoucherTab.available ? 0 : 1;
   }
 
   @override
   Widget build(BuildContext context) {
-    final _ = _sb.auth.currentUser != null; // isSelf not used but could be
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Vouchers',
-            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-        centerTitle: true,
-        backgroundColor: Colors.white,
-        elevation: 0,
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: primaryPurple,
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: primaryPurple,
-          tabs: const [
-            Tab(text: 'Available'),
-            Tab(text: 'Used / Expired'),
-          ],
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [kBgTop, kBgBottom],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
         ),
       ),
-      body: FutureBuilder<List<Coupon>>(
+      child: DefaultTabController(
+        length: 2,
+        initialIndex: _initialIndex,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            elevation: 0,
+            centerTitle: true,
+            backgroundColor: Colors.transparent,
+            foregroundColor: kText,
+            title: ShaderMask(
+              shaderCallback: (r) =>
+                  const LinearGradient(colors: [kPrimary, kPrimary2]).createShader(r),
+              child: const Text('Coupons',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+            ),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(48),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: _PillTabBar(
+                  tabs: const [Text('Available'), Text('My coupons')],
+                ),
+              ),
+            ),
+          ),
+          body: const TabBarView(
+            physics: BouncingScrollPhysics(),
+            children: [
+              _AvailableCouponsTab(),
+              _MyCouponsTab(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ---------------------------- Pretty pill TabBar --------------------------- */
+
+class _PillTabBar extends StatelessWidget {
+  final List<Widget> tabs;
+  const _PillTabBar({required this.tabs});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = DefaultTabController.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: const Color(0x11000000)),
+        boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 10)],
+      ),
+      child: TabBar(
+        controller: controller,
+        tabs: tabs,
+        labelPadding: const EdgeInsets.symmetric(horizontal: 0),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        indicator: BoxDecoration(
+          color: kPrimary.withOpacity(.12),
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: kPrimary),
+        ),
+        labelColor: kPrimary,
+        unselectedLabelColor: kText,
+        splashBorderRadius: BorderRadius.circular(99),
+      ),
+    );
+  }
+}
+
+/* -------------------------- Available coupons tab -------------------------- */
+
+class _AvailableCouponsTab extends StatefulWidget {
+  const _AvailableCouponsTab();
+
+  @override
+  State<_AvailableCouponsTab> createState() => _AvailableCouponsTabState();
+}
+
+class _AvailableCouponsTabState extends State<_AvailableCouponsTab> {
+  late Future<List<Map<String, dynamic>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _future = VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
+    });
+  }
+
+  String _subtitle(Map<String, dynamic> c) {
+    final type = (c['discount_type'] ?? '').toString();
+    final val = c['discount_value'];
+    final code = (c['code'] ?? '').toString();
+    final expires = (c['expires_at'] ?? '').toString();
+
+    final typeTxt = type == 'percent'
+        ? 'Save $val%'
+        : type == 'amount'
+        ? 'Save ฿$val'
+        : 'Coupon';
+
+    return [
+      if (code.isNotEmpty) 'Code: $code',
+      typeTxt,
+      if (expires.isNotEmpty) 'Ends: $expires',
+    ].join(' • ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: _reload,
+      color: kPrimary,
+      child: FutureBuilder<List<Map<String, dynamic>>>(
         future: _future,
         builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return Center(
-              child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation(primaryPurple)),
-            );
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator(color: kPrimary));
           }
           if (snap.hasError) {
-            return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text('Error: ${snap.error}', textAlign: TextAlign.center),
-                ));
-          }
-          final items = snap.data ?? [];
-          final available = items.where((c) => c.isAvailable).toList();
-          final usedExpired = items.where((c) => !c.isAvailable).toList();
-
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            color: primaryPurple,
-            child: TabBarView(
-              controller: _tabController,
+            return ListView(
               children: [
-                _VoucherList(
-                  vouchers: available,
-                  emptyText: 'No available vouchers yet.',
-                  primaryPurple: primaryPurple,
-                  showApply: true,
-                ),
-                _VoucherList(
-                  vouchers: usedExpired,
-                  emptyText: 'No used or expired vouchers.',
-                  primaryPurple: primaryPurple,
-                  showApply: false,
+                const SizedBox(height: 24),
+                _ErrorBox('Failed to load coupons: ${snap.error}'),
+              ],
+            );
+          }
+
+          final items = snap.data ?? const [];
+          if (items.isEmpty) {
+            return ListView(
+              children: const [
+                SizedBox(height: 48),
+                _EmptyState(
+                  title: 'No coupons available',
+                  caption: 'Please check back later.',
                 ),
               ],
-            ),
+            );
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (_, i) {
+              final c = items[i];
+              return _CouponCard(
+                colorA: kPrimaryLiteA,
+                colorB: kPrimaryLiteB,
+                borderColor: kPrimary.withOpacity(.25),
+                title: (c['title'] ?? 'Coupon').toString(),
+                subtitle: _subtitle(c),
+                actionText: 'Claim',
+                onPressed: () async {
+                  try {
+                    final idAny = c['id'];
+                    if (idAny == null) throw StateError('Invalid coupon id');
+                    final id = int.tryParse(idAny.toString());
+                    if (id == null) throw StateError('Invalid coupon id');
+
+                    await VoucherService.claimCoupon(id);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Coupon claimed!')),
+                    );
+                    await _reload();
+                  } on PostgrestException catch (e) {
+                    if (!mounted) return;
+                    final msg = (e.code == '23505')
+                        ? 'Already claimed.'
+                        : (e.code == '42501')
+                        ? 'Permission denied.'
+                        : 'Cannot claim coupon.';
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(msg)));
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                },
+              );
+            },
           );
         },
       ),
@@ -105,125 +262,240 @@ class _VoucherScreenState extends State<VoucherScreen>
   }
 }
 
-class _VoucherList extends StatelessWidget {
-  final List<Coupon> vouchers;
-  final String emptyText;
-  final Color primaryPurple;
-  final bool showApply;
+/* ---------------------------- My coupons tab ---------------------------- */
 
-  const _VoucherList({
-    required this.vouchers,
-    required this.emptyText,
-    required this.primaryPurple,
-    required this.showApply,
-  });
+class _MyCouponsTab extends StatefulWidget {
+  const _MyCouponsTab();
 
-  String _fmt(DateTime dt) => dt.toLocal().toString().split('.').first;
+  @override
+  State<_MyCouponsTab> createState() => _MyCouponsTabState();
+}
+
+class _MyCouponsTabState extends State<_MyCouponsTab> {
+  late Future<List<Map<String, dynamic>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = VoucherService.fetchMyClaimedCoupons();
+  }
+
+  Future<void> _reload() async {
+    setState(() => _future = VoucherService.fetchMyClaimedCoupons());
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (vouchers.isEmpty) {
-      return ListView(
-        children: [
-          const SizedBox(height: 80),
-          Center(child: Text(emptyText, style: const TextStyle(color: Colors.grey))),
-        ],
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: vouchers.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, i) {
-        final c = vouchers[i];
-        final expiry = c.effectiveExpiry;
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade200),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2))
-            ],
-          ),
-          child: ListTile(
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: c.imageUrl != null && c.imageUrl!.isNotEmpty
-                  ? Image.network(c.imageUrl!, width: 56, height: 56, fit: BoxFit.cover)
-                  : Container(
-                width: 56,
-                height: 56,
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.card_giftcard, color: Colors.black54),
-              ),
-            ),
-            title: Text(c.title, style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return RefreshIndicator(
+      onRefresh: _reload,
+      color: kPrimary,
+      child: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator(color: kPrimary));
+          }
+          if (snap.hasError) {
+            return ListView(
               children: [
-                if (c.description != null && c.description!.isNotEmpty)
-                  Text(c.description!, maxLines: 2, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (c.code != null && c.code!.isNotEmpty) _Chip(text: 'Code: ${c.code!}'),
-                    _Chip(text: c.discountType == 'percent' ? '−${c.discountValue}%' : '−${c.discountValue}'),
-                    if (c.minSpend != null) _Chip(text: 'Min spend: ${c.minSpend}'),
-                    _Chip(text: 'Claimed: ${_fmt(c.claimedAt)}'),
-                    _Chip(text: expiry != null ? 'Expires: ${_fmt(expiry)}' : 'No expiry'),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                if (!c.isAvailable)
-                  Text(
-                    c.isUsed ? 'Used on: ${_fmt(c.usedAt!)}' : 'Expired',
-                    style: TextStyle(
-                        color: c.isUsed ? Colors.blueGrey : Colors.red.shade400,
-                        fontWeight: FontWeight.w600),
-                  ),
+                const SizedBox(height: 24),
+                _ErrorBox('Failed to load your coupons: ${snap.error}'),
               ],
-            ),
-            isThreeLine: true,
-            trailing: showApply
-                ? ElevatedButton(
-              onPressed: () => Navigator.pop(context, c),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryPurple,
-                minimumSize: const Size(82, 40),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              child: const Text('Use'),
-            )
-                : null,
-          ),
-        );
-      },
+            );
+          }
+
+          final items = snap.data ?? const [];
+          if (items.isEmpty) {
+            return ListView(
+              children: const [
+                SizedBox(height: 48),
+                _EmptyState(
+                  title: 'No claimed coupons yet',
+                  caption: 'Claim some from the Available tab.',
+                ),
+              ],
+            );
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (_, i) {
+              final row = items[i];
+              final c = (row['coupons'] as Map?)?.cast<String, dynamic>() ?? {};
+              final title = (c['title'] ?? 'Coupon').toString();
+              final code = (c['code'] ?? '').toString();
+              final expires = (c['expires_at'] ?? '').toString();
+              final sub = [
+                if (code.isNotEmpty) 'Code: $code',
+                if (expires.isNotEmpty) 'Ends: $expires',
+              ].join(' • ');
+
+              return _CouponCard(
+                colorA: Colors.white,
+                colorB: Colors.white,
+                borderColor: const Color(0x22000000),
+                title: title,
+                subtitle: sub.isEmpty ? 'Claimed coupon' : sub,
+                actionText: 'Claimed',
+                onPressed: null,
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
 
-class _Chip extends StatelessWidget {
-  final String text;
-  const _Chip({required this.text});
+/* ------------------------------- UI pieces ------------------------------- */
+
+class _CouponCard extends StatelessWidget {
+  final Color colorA;
+  final Color colorB;
+  final Color borderColor;
+  final String title;
+  final String subtitle;
+  final String actionText;
+  final VoidCallback? onPressed;
+
+  const _CouponCard({
+    required this.colorA,
+    required this.colorB,
+    required this.borderColor,
+    required this.title,
+    required this.subtitle,
+    required this.actionText,
+    required this.onPressed,
+  });
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.grey.shade200),
+        gradient: LinearGradient(colors: [colorA, colorB]),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+        boxShadow: const [
+          BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 6)),
+        ],
       ),
-      child: Text(text, style: const TextStyle(fontSize: 12)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                height: 44,
+                width: 44,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: kPrimary.withOpacity(.25)),
+                ),
+                child: const Icon(Icons.local_offer_rounded, color: kPrimary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: kText,
+                        )),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: kMuted, fontSize: 12, height: 1.25),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: onPressed,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: onPressed == null ? Colors.white : Colors.black,
+                  foregroundColor: onPressed == null ? kText : Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  side: onPressed == null
+                      ? const BorderSide(color: Color(0x22000000))
+                      : BorderSide.none,
+                  elevation: 0,
+                ),
+                child: Text(
+                  actionText,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final String title;
+  final String caption;
+  const _EmptyState({required this.title, required this.caption});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: glassCard(18),
+        child: Column(
+          children: [
+            Icon(Icons.local_offer_outlined, size: 64, color: kPrimary.withOpacity(.35)),
+            const SizedBox(height: 8),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w900, color: kText)),
+            const SizedBox(height: 6),
+            Text(caption, textAlign: TextAlign.center, style: const TextStyle(color: kMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorBox extends StatelessWidget {
+  final String message;
+  const _ErrorBox(this.message);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: glassCard(16).copyWith(
+          color: const Color(0xFFFFF5F7),
+          border: Border.all(color: const Color(0x26E11D48)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Color(0xFFE11D48)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message, style: const TextStyle(color: Color(0xFFE11D48)))),
+          ],
+        ),
+      ),
     );
   }
 }

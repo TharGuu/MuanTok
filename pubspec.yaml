@@ -72,5 +72,6 @@ flutter:
      - .env
      - assets/banners/christmas_sale.png
      - assets/banners/promotion.png
+     - assets/banners/qr_payment.png
 
 

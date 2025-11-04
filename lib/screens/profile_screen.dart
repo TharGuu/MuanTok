@@ -1,20 +1,24 @@
 // lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
-import 'package:muantok/screens/signin_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+// ✅ keep only one SignIn import
+import 'signin_screen.dart'; // provides SignInScreen
+
+// ✅ correct path to the card manager screen
+import '../features/profile/payment_cards_screen.dart';
 
 import '../models/user_profile.dart';
 import '../services/profile_service.dart';
 import 'edit_profile_screen.dart';
 import 'main_navigation.dart';
-import 'signin_screen.dart' hide SignInScreen;
 import '../services/messaging_service.dart';
 import 'chat_room_screen.dart';
 import 'my_products_screen.dart';
 import '../features/profile/voucher_screen.dart';
 import 'connections_screen.dart';
 
-// 👇 NEW: to fetch best discounts and keep card pricing consistent
+// 👇 to fetch best discounts for the viewer’s published products section
 import '../services/supabase_service.dart';
 import 'product_detail_screen.dart';
 
@@ -29,7 +33,10 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final ProfileService _profileService = ProfileService();
   final MessagingService _messagingService = MessagingService();
-  final Color primaryPurple = const Color(0xFF673ab7);
+
+  // Lucid purple
+  final Color primaryPurple = const Color(0xFF7C3AED);
+
   final _supabase = Supabase.instance.client;
 
   late Future<UserProfile> _userProfileFuture;
@@ -58,11 +65,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _refreshProfile() async {
     final newProfileData = _fetchData();
-
     setState(() {
       _userProfileFuture = newProfileData;
     });
-
     if (!_isSelf && _viewerId.isNotEmpty) {
       await _checkFollowing();
     }
@@ -103,11 +108,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _refreshProfile();
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         _isFollowing = wasFollowing;
       });
-
       if (e is PostgrestException && e.code == '23505') {
         // duplicate key; ignore
       } else {
@@ -115,7 +118,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SnackBar(content: Text('Action failed: $e')),
         );
       }
-
       await _refreshProfile();
     }
   }
@@ -154,17 +156,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         title: Text(
           _isSelf ? 'My Profile' : 'Profile',
-          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
         ),
         centerTitle: true,
         backgroundColor: Colors.white,
         elevation: 0,
         toolbarHeight: 50,
+        foregroundColor: Colors.black87,
         actions: [
           if (_isSelf)
             IconButton(
               tooltip: 'Log out',
-              icon: const Icon(Icons.logout, color: Colors.black87),
+              icon: const Icon(Icons.logout),
               onPressed: _signOut,
             ),
         ],
@@ -211,17 +213,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 10),
                       Text(
                         user.fullName ?? 'User',
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
                       ),
                       Text(
-                        '@${(user.fullName ?? 'user').replaceAll(' ', '').toLowerCase()}',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyLarge
-                            ?.copyWith(color: Colors.grey),
+                        '@${(user.fullName ?? "user").replaceAll(" ", "").toLowerCase()}',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
                       ),
                       const SizedBox(height: 10),
                       Padding(
@@ -243,9 +239,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: _isFollowing ? Colors.grey.shade300 : primaryPurple,
                                   minimumSize: const Size(double.infinity, 45),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
                                 child: Text(
                                   _isFollowing ? 'Following' : 'Follow',
@@ -279,17 +273,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 style: OutlinedButton.styleFrom(
                                   minimumSize: const Size(double.infinity, 45),
                                   side: const BorderSide(color: Colors.grey),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
-                                child: const Text(
-                                  'Message',
-                                  style: TextStyle(
-                                    color: Colors.black,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
+                                child: const Text('Message', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                               ),
                             ),
                           ],
@@ -300,52 +286,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onPressed: () async {
                             final bool? updated = await Navigator.push<bool>(
                               context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      EditProfileScreen(initialProfile: user)),
+                              MaterialPageRoute(builder: (_) => EditProfileScreen(initialProfile: user)),
                             );
                             if (updated == true) _refreshProfile();
                           },
                           style: OutlinedButton.styleFrom(
                             minimumSize: const Size(double.infinity, 45),
                             side: const BorderSide(color: Colors.grey),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
-                          child: const Text(
-                            'Edit Profile',
-                            style: TextStyle(
-                                color: Colors.black, fontWeight: FontWeight.bold),
-                          ),
+                          child: const Text('Edit Profile', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                         ),
                         const SizedBox(height: 10),
 
                         ElevatedButton(
                           onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const MyProductsScreen()),
-                            );
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const MyProductsScreen()));
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: primaryPurple,
                             minimumSize: const Size(double.infinity, 45),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
-                          child: const Text(
-                            'My Products',
-                            style: TextStyle(
-                                color: Colors.white, fontWeight: FontWeight.bold),
-                          ),
+                          child: const Text('My Products', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ],
                   ),
                 ),
-                const SizedBox(height: 30),
 
+                const SizedBox(height: 30),
                 _SectionHeader(title: 'Social Connections'),
                 _ConnectionTile(
                   title: 'Following',
@@ -354,11 +324,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                          builder: (_) => ConnectionsScreen(
-                              userId: _targetId,
-                              mode: ConnectionsMode.following,
-                              initialCount: user.followingCount,
-                          ),
+                        builder: (_) => ConnectionsScreen(
+                          userId: _targetId,
+                          mode: ConnectionsMode.following,
+                          initialCount: user.followingCount,
+                        ),
                       ),
                     );
                   },
@@ -370,22 +340,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                          builder: (_) => ConnectionsScreen(
-                              userId: _targetId,
-                              mode: ConnectionsMode.followers,
-                              initialCount: user.followersCount,
-                          ),
+                        builder: (_) => ConnectionsScreen(
+                          userId: _targetId,
+                          mode: ConnectionsMode.followers,
+                          initialCount: user.followersCount,
+                        ),
                       ),
                     );
                   },
                 ),
                 const SizedBox(height: 20),
 
-                // 👇 NEW: Viewer-only published products grid
+                // Viewer-only published products
                 if (!_isSelf) ViewerPublishedProductsSection(sellerId: _targetId),
 
                 if (_isSelf) ...[
                   _SectionHeader(title: 'Account Actions'),
+
+                  // ✅ NEW: Payment cards manager
+                  _ActionTile(
+                    title: 'Payment cards',
+                    icon: Icons.credit_card,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const PaymentCardsScreen()),
+                      );
+                    },
+                    color: primaryPurple,
+                  ),
+
                   _ActionTile(
                     title: 'Voucher',
                     icon: Icons.card_giftcard_outlined,
@@ -393,8 +377,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                          const VoucherScreen(initialTab: VoucherTab.available),
+                          builder: (_) => const VoucherScreen(initialTab: VoucherTab.available),
                         ),
                       );
                     },
@@ -426,9 +409,10 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 10.0, bottom: 8.0),
-    child: Text(title,
-        style: const TextStyle(
-            fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+    child: Text(
+      title,
+      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+    ),
   );
 }
 
@@ -437,11 +421,12 @@ class _ConnectionTile extends StatelessWidget {
   final int count;
   final String Function(int) formatCount;
   final VoidCallback onTap;
-  const _ConnectionTile(
-      {required this.title,
-        required this.count,
-        required this.formatCount,
-        required this.onTap});
+  const _ConnectionTile({
+    required this.title,
+    required this.count,
+    required this.formatCount,
+    required this.onTap,
+  });
   @override
   Widget build(BuildContext context) {
     return ListTile(
@@ -449,8 +434,7 @@ class _ConnectionTile extends StatelessWidget {
       leading: Icon(Icons.person_outline, color: Colors.grey.shade700),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(formatCount(count),
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        Text(formatCount(count), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         const SizedBox(width: 4),
         const Icon(Icons.chevron_right, color: Colors.grey),
       ]),
@@ -465,21 +449,26 @@ class _ActionTile extends StatelessWidget {
   final VoidCallback onTap;
   final bool isDestructive;
   final Color color;
-  const _ActionTile(
-      {required this.title,
-        required this.icon,
-        required this.onTap,
-        required this.color,
-        this.isDestructive = false});
+  const _ActionTile({
+    required this.title,
+    required this.icon,
+    required this.onTap,
+    required this.color,
+    this.isDestructive = false,
+  });
   @override
   Widget build(BuildContext context) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: color),
-      title: Text(title,
-          style: TextStyle(
-              color: isDestructive ? Colors.red : color,
-              fontWeight: FontWeight.w500)),
+      leading: CircleAvatar(
+        radius: 18,
+        backgroundColor: isDestructive ? Colors.red.withOpacity(.12) : color.withOpacity(.12),
+        child: Icon(icon, color: isDestructive ? Colors.red : color),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(color: isDestructive ? Colors.red : Colors.black87, fontWeight: FontWeight.w600),
+      ),
       trailing: const Icon(Icons.chevron_right, color: Colors.grey),
       onTap: onTap,
     );
@@ -487,7 +476,7 @@ class _ActionTile extends StatelessWidget {
 }
 
 /* =================================================================== */
-/* ============= Viewer Published Products (NEW SECTION) ============= */
+/* ============= Viewer Published Products (unchanged) =============== */
 /* =================================================================== */
 
 class ViewerPublishedProductsSection extends StatefulWidget {
@@ -495,12 +484,10 @@ class ViewerPublishedProductsSection extends StatefulWidget {
   const ViewerPublishedProductsSection({super.key, required this.sellerId});
 
   @override
-  State<ViewerPublishedProductsSection> createState() =>
-      _ViewerPublishedProductsSectionState();
+  State<ViewerPublishedProductsSection> createState() => _ViewerPublishedProductsSectionState();
 }
 
-class _ViewerPublishedProductsSectionState
-    extends State<ViewerPublishedProductsSection> {
+class _ViewerPublishedProductsSectionState extends State<ViewerPublishedProductsSection> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _items = [];
@@ -537,7 +524,6 @@ class _ViewerPublishedProductsSectionState
 
       final list = (rows as List).cast<Map<String, dynamic>>();
 
-      // inject best discount (uses your existing service)
       final ids = list.map((e) => e['id']).whereType<int>().toList();
       final best = await SupabaseService.fetchBestDiscountMapForProducts(ids);
       for (final p in list) {
@@ -563,7 +549,6 @@ class _ViewerPublishedProductsSectionState
     return Column(
       children: [
         _SectionHeader(title: 'Published products'),
-
         if (_loading)
           const Padding(
             padding: EdgeInsets.only(top: 12, bottom: 20),
@@ -577,10 +562,7 @@ class _ViewerPublishedProductsSectionState
         else if (_items.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('No products yet.'),
-              ),
+              child: Align(alignment: Alignment.centerLeft, child: Text('No products yet.')),
             )
           else
             GridView.builder(
@@ -640,8 +622,7 @@ class _ViewerProductCard extends StatelessWidget {
         ? data['discount_percent'] as int
         : int.tryParse('${data['discount_percent'] ?? 0}') ?? 0;
     final hasDiscount = discountPercent > 0 && priceRaw > 0;
-    final num discounted =
-    hasDiscount ? (priceRaw * (100 - discountPercent)) / 100 : priceRaw;
+    final num discounted = hasDiscount ? (priceRaw * (100 - discountPercent)) / 100 : priceRaw;
 
     return Material(
       color: Colors.white,
@@ -669,10 +650,7 @@ class _ViewerProductCard extends StatelessWidget {
                     child: img == null
                         ? Container(
                       color: Colors.grey.shade200,
-                      child: const Icon(
-                        Icons.image_not_supported_outlined,
-                        color: Colors.grey,
-                      ),
+                      child: const Icon(Icons.image_not_supported_outlined, color: Colors.grey),
                     )
                         : Image.network(img, fit: BoxFit.cover),
                   ),
@@ -688,12 +666,7 @@ class _ViewerProductCard extends StatelessWidget {
                         ),
                         child: Text(
                           category,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            height: 1.0,
-                          ),
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600, height: 1.0),
                         ),
                       ),
                     ),
@@ -703,18 +676,10 @@ class _ViewerProductCard extends StatelessWidget {
                       top: 8,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade600,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                        decoration: BoxDecoration(color: Colors.red.shade600, borderRadius: BorderRadius.circular(8)),
                         child: Text(
                           '-$discountPercent%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            height: 1.0,
-                          ),
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800, height: 1.0),
                         ),
                       ),
                     ),
@@ -730,10 +695,7 @@ class _ViewerProductCard extends StatelessWidget {
                     name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                   ),
                   const SizedBox(height: 4),
                   hasDiscount
@@ -742,12 +704,7 @@ class _ViewerProductCard extends StatelessWidget {
                     children: [
                       Text(
                         '฿ ${_fmtBaht(discounted)}',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                          height: 1.0,
-                        ),
+                        style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w800, fontSize: 14, height: 1.0),
                       ),
                       const SizedBox(width: 6),
                       Text(
@@ -767,11 +724,7 @@ class _ViewerProductCard extends StatelessWidget {
                     priceRaw == 0 ? '' : '฿ ${_fmtBaht(priceRaw)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      height: 1.0,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, height: 1.0),
                   ),
                 ],
               ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
 import 'product_detail_screen.dart';
+import 'checkout_screen.dart';
 
 /// ---------------------------------------------------------------------------
 /// Lucid (Purple) Theme Tokens
@@ -315,7 +316,10 @@ class _CartScreenState extends State<CartScreen> {
             : _SubtotalBar(
           subtotalText: '฿ ${_fmtBaht(_subtotal)}',
           onCheckout: () {
-            _toast('Checkout flow coming soon');
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CheckoutScreen()),
+            );
           },
         ),
       ),
