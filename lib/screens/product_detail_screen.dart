@@ -9,6 +9,7 @@ import '../features/profile/voucher_screen.dart';
 import 'favourite_screen.dart';
 import 'profile_screen.dart';
 import 'cart_screen.dart';
+import 'buy_now_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final int productId;
@@ -1491,8 +1492,28 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ),
               onPressed: blocked
                   ? null
-                  : () {
-                // TODO: navigate to checkout with single-item intent
+                  : () {// If you already keep a qty on this screen, plug it in here.
+                // Example variable names you might already have: `_qty`, `_quantity`, `selectedQty`.
+                // If none exists yet, this defaults to 1.
+                final int initialQty = (() {
+                  // TODO: change `_qty` to your actual qty state variable if you have one
+                  try {
+                    // ignore: unnecessary_cast, avoid_dynamic_calls
+                    final v = (this as dynamic)._qty;
+                    if (v is int && v > 0) return v;
+                  } catch (_) {}
+                  return 1;
+                })();
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BuyNowScreen(
+                      productId: widget.productId,
+                      initialQty: initialQty,
+                    ),
+                  ),
+                );
               },
               child: Text(
                 blocked ? 'Unavailable' : 'Buy now',
