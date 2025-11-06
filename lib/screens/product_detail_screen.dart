@@ -1,5 +1,7 @@
+// lib/screens/product_detail_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'my_products_screen.dart';
 import 'promotion_screen.dart';
 import 'event_products_screen.dart';
 import '../services/supabase_service.dart';
@@ -23,47 +25,24 @@ class ProductDetailScreen extends StatefulWidget {
 }
 
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
-
+  // ---- state ----
   bool _isFavourite = false;
   bool _togglingFav = false;
   bool _loading = true;
   int? _favRowId;
   String? _error;
 
-  Map<String, dynamic>? _bestDiscountEvent() {
-    if (_events.isEmpty) return null;
-
-    Map<String, dynamic>? best;
-    int bestPct = -1;
-
-    for (final ev in _events) {
-      // Accept common keys for id/percent/name
-      final int? id = (ev['id'] ?? ev['event_id']) is int
-          ? (ev['id'] ?? ev['event_id']) as int
-          : int.tryParse('${ev['id'] ?? ev['event_id'] ?? ''}');
-
-      final int pct = (ev['discount_percent'] is num)
-          ? (ev['discount_percent'] as num).toInt()
-          : int.tryParse('${ev['discount_percent'] ?? 0}') ?? 0;
-
-      if (id != null && pct > bestPct) {
-        bestPct = pct;
-        best = ev;
-      }
-    }
-
-    // fall back to first event if all percents are invalid
-    return best ?? _events.first;
-  }
-
-
   Map<String, dynamic>? _product; // Product info
   List<Map<String, dynamic>> _events = []; // [{ event_name, discount_percent }]
   List<Map<String, dynamic>> _comments = []; // preview comments (limit 3)
   List<Map<String, dynamic>> _related = []; // related products same category
 
-  // NEW: active banner image for this product's event (nullable)
+  // Event banner
   String? _activeEventBannerUrl;
+
+  // Roles
+  bool _iAmAdmin = false;
+  bool _iAmSeller = false;
 
   RealtimeChannel? _commentChannel;
 
@@ -81,7 +60,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   @override
   void initState() {
     super.initState();
-
     _product = widget.initialData;
 
     _subscribeToComments();
@@ -97,14 +75,66 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   // ensure we fetch AFTER first frame so auth/realtime is stable
   void _initLoadAfterBuild() {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _resolveRoleFlags();
       await _fetchAll();            // product, events, comments
       await _refreshCommentsOnly(); // force sync preview comments
       await _fetchRelated();        // pull related items
       await _fetchActiveEventBanner(); // pull active banner
       await _checkFav();            //
       await _loadFavouriteStatus();
-
     });
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /*                                ROLES / VISIBILITY                          */
+  /* -------------------------------------------------------------------------- */
+
+  Future<void> _resolveRoleFlags() async {
+    final sb = Supabase.instance.client;
+    final me = sb.auth.currentUser;
+
+    // seller?
+    _iAmSeller = _whoAmIIsSeller(_product);
+
+    // admin fast path via auth metadata
+    bool admin = false;
+    final roleMeta = me?.userMetadata?['role'];
+    if (roleMeta != null && '$roleMeta'.toLowerCase() == 'admin') admin = true;
+
+    // fallback via users table
+    if (!admin && me?.id != null) {
+      try {
+        final rows = await sb
+            .from('users')
+            .select('is_admin, role')
+            .eq('id', me!.id)
+            .limit(1);
+        if (rows is List && rows.isNotEmpty) {
+          final r = rows.first as Map<String, dynamic>;
+          if ((r['is_admin'] ?? false) == true) admin = true;
+          final role = (r['role'] ?? '').toString().toLowerCase();
+          if (role == 'admin') admin = true;
+        }
+      } catch (_) {}
+    }
+
+    if (mounted) setState(() => _iAmAdmin = admin);
+  }
+
+  bool _whoAmIIsSeller(Map<String, dynamic>? p) {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return false;
+    final sid = _extractSellerId(p);
+    return sid != null && sid == uid;
+  }
+
+  bool _viewerIsBlockedByStock() {
+    final p = _product;
+    if (p == null) return false;
+    final stock = (p['stock'] is int)
+        ? p['stock'] as int
+        : int.tryParse('${p['stock'] ?? 0}') ?? 0;
+    return stock <= 0 && !_iAmAdmin && !_iAmSeller;
   }
 
   /* -------------------------------------------------------------------------- */
@@ -130,6 +160,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         widget.productId,
         limit: _commentPreviewLimit,
       );
+
+      // recompute role with fresh product
+      _iAmSeller = _whoAmIIsSeller(freshProduct);
 
       if (!mounted) return;
       setState(() {
@@ -166,11 +199,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
-
-
   // RELATED PRODUCTS
   Future<void> _fetchRelated() async {
-    // We can only fetch related after we know product + category.
     final prod = _product;
     if (prod == null) return;
 
@@ -203,23 +233,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   // Try to read seller id from the data you already have.
-// Falls back to null if not available yet.
   String? _extractSellerId(Map<String, dynamic>? data) {
     if (data == null) return null;
     final v = data['seller_id'] ?? data['sellerId'] ?? data['seller']?['id'];
-    if (v is String && v.isNotEmpty) return v;
-    return v?.toString();
+    if (v == null) return null;
+    return '$v';
   }
 
-
-  void _openSellerStore() async {
-    // Prefer seller_id from the initial product snapshot first
-    final fromInitial = _extractSellerId(widget.initialData as Map<String, dynamic>?);
-
-    // If you keep a fetched/merged product map in state, try that too:
-    final fromLoaded = _extractSellerId(_product); // <- replace _product with your variable
-
-    final sellerId = fromInitial ?? fromLoaded;
+  void _openSellerStore() {
+    final sellerId =
+        _extractSellerId(_product) ?? _extractSellerId(widget.initialData);
     if (sellerId == null || sellerId.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -228,50 +251,35 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       }
       return;
     }
-
-    // Jump to viewer-mode profile (Published products grid will show there)
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ProfileScreen(userId: sellerId),
-      ),
+      MaterialPageRoute(builder: (_) => const MyProductsScreen()),
     );
   }
 
-
-
-
-  // NEW: get banner for active event of this product
+  // NEW: get banner for active event of this product (simple mapping demo)
   Future<void> _fetchActiveEventBanner() async {
     try {
-      // Assuming the event name is available in the _events list
-      final eventName = _events.isNotEmpty ? _events.first['event_name'] : null;
+      final eventName =
+      _events.isNotEmpty ? (_events.first['event_name'] ?? _events.first['name']) : null;
 
       if (eventName == 'Christmas Sale') {
-        setState(() {
-          _activeEventBannerUrl = 'assets/banners/christmas_sale.png'; // Path for Christmas Sale banner
-        });
+        setState(() => _activeEventBannerUrl = 'assets/banners/christmas_sale.png');
       } else if (eventName == 'Promotion') {
-        setState(() {
-          _activeEventBannerUrl = 'assets/banners/promotion.png'; // Path for Promotion banner
-        });
+        setState(() => _activeEventBannerUrl = 'assets/banners/promotion.png');
       } else {
-        setState(() {
-          _activeEventBannerUrl = null;  // No banner for other events
-        });
+        setState(() => _activeEventBannerUrl = null);
       }
-    } catch (e) {
-      // Ignore silently, banner is optional
+    } catch (_) {
+      setState(() => _activeEventBannerUrl = null);
     }
   }
 
-  //favourite
+  // favourites
   Future<void> _checkFav() async {
     try {
       final fav = await SupabaseService.isFavourited(productId: widget.productId);
       if (mounted) setState(() => _isFavourite = fav);
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadFavouriteStatus() async {
@@ -327,37 +335,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     setState(() => _togglingFav = true);
     try {
-      if (adding) {
-        final inserted = await sb
-            .from('favourites')
-            .insert({'user_id': uid, 'product_id': widget.productId})
-            .select('id')
-            .single();
-
-        if (!mounted) return;
-        setState(() {
-          _isFavourite = true;
-          _favRowId = inserted['id'] as int?;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Added to favourites')),
-        );
-      } else {
-        await sb
-            .from('favourites')
-            .delete()
-            .eq('user_id', uid)
-            .eq('product_id', widget.productId);
-
-        if (!mounted) return;
-        setState(() {
-          _isFavourite = false;
-          _favRowId = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Removed from favourites')),
-        );
-      }
+      final now = await SupabaseService.toggleFavourite(productId: widget.productId);
+      if (!mounted) return;
+      setState(() => _isFavourite = now);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(now ? 'Added to favourites' : 'Removed from favourites')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -368,12 +351,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
-//add to cart
+  // add to cart
   Future<void> _handleAddToCart() async {
     try {
-      // default add 1 item
       await SupabaseService.addToCart(productId: widget.productId, qty: 1);
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -389,12 +370,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ),
       );
     } on StateError catch (e) {
-      // likely "Not logged in" from requireUserId()
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message)),
-      );
-
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -402,12 +379,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       );
     }
   }
-
-
-
-
-
-
 
   /* -------------------------------------------------------------------------- */
   /*                           REALTIME COMMENT UPDATES                          */
@@ -463,13 +434,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     // force-fill preview right away
     _refreshCommentsOnly();
   }
-
-
-
-
-
-
-
 
   /* -------------------------------------------------------------------------- */
   /*                        EDIT / DELETE EXISTING COMMENTS                     */
@@ -787,15 +751,107 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       );
     }
 
+    // When viewers (not seller/admin) see out-of-stock -> show minimal screen
+    if (p != null && _viewerIsBlockedByStock()) {
+      final name = (p['name'] ?? 'Product').toString();
+      final images = _imgList(p['image_urls'] ?? p['imageurl'] ?? p['image_url']);
+      final img = images.isNotEmpty ? images.first : null;
 
-
-
+      return Scaffold(
+        backgroundColor: kCardBg,
+        appBar: AppBar(
+          titleSpacing: 0,
+          elevation: 0.5,
+          backgroundColor: kCardBg,
+          foregroundColor: kTextDark,
+          title: Text(
+            name.isEmpty ? 'Product' : name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: kTextDark,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          actions: [
+            IconButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => FavouriteScreen()),
+              ),
+              icon: const Icon(Icons.favorite_border_rounded, color: kPurple),
+            ),
+            IconButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CartScreen()),
+              ),
+              icon: const Icon(Icons.shopping_cart_outlined, color: kPurple),
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            loadingOverlay,
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: img == null
+                          ? Container(
+                        color: Colors.grey.shade200,
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.image_not_supported_outlined,
+                          color: Colors.grey,
+                          size: 40,
+                        ),
+                      )
+                          : Image.network(img, fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: kSubtleBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: kBorderGrey),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.inventory_2_rounded, color: Colors.grey.shade700),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'This item is currently out of stock and hidden from buyers.',
+                            style: TextStyle(color: kTextDark, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('If you think this is a mistake, please check back later.',
+                      style: TextStyle(color: kTextLight)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     // safe unwrap
     final name = (p?['name'] ?? '').toString();
     final desc = (p?['description'] ?? '').toString();
     final category = (p?['category'] ?? '').toString();
-    final stock = p?['stock'];
+    final dynamic stockRaw = p?['stock'];
+    final int stock = stockRaw is int
+        ? stockRaw
+        : int.tryParse(stockRaw?.toString() ?? '0') ?? 0;
 
     final dynamic _priceField = p?['price'];
     final num rawPrice = _priceField is num
@@ -831,7 +887,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           name.isEmpty ? 'Product' : name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(
+          style: const TextStyle(
             color: kTextDark,
             fontWeight: FontWeight.w600,
           ),
@@ -843,7 +899,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 MaterialPageRoute(builder: (_) => FavouriteScreen()),
               );
             },
-            icon: Icon(
+            icon: const Icon(
               Icons.favorite_border_rounded,
               color: kPurple,
             ),
@@ -854,17 +910,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 MaterialPageRoute(builder: (_) => const CartScreen()),
               );
             },
-            icon: Icon(
+            icon: const Icon(
               Icons.shopping_cart_outlined,
               color: kPurple,
             ),
           ),
-
         ],
       ),
       body: Column(
         children: [
           loadingOverlay,
+
+          // Seller/Admin banner when stock == 0
+          if (stock <= 0 && (_iAmAdmin || _iAmSeller))
+            _hiddenBannerForAdminsAndSeller(),
+
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {
@@ -903,8 +963,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 12),
 
-
-
                   /* ------------------- CORE PRODUCT CARD ------------------- */
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -922,7 +980,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                           child: Text(
                             name,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
                               color: kTextDark,
@@ -940,7 +998,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                Icon(
+                                const Icon(
                                   Icons.category_rounded,
                                   size: 20,
                                   color: kTextDark,
@@ -949,7 +1007,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 Expanded(
                                   child: Text(
                                     'Category: $category',
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       fontWeight: FontWeight.w500,
                                       fontSize: 14,
                                       color: kTextDark,
@@ -969,8 +1027,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: hasDiscount
                               ? Row(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Text(
                                 '฿ ${_fmt(discountedPrice)}',
@@ -985,8 +1042,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 '฿ ${_fmt(rawPrice)}',
                                 style: TextStyle(
                                   color: Colors.grey.shade600,
-                                  decoration:
-                                  TextDecoration.lineThrough,
+                                  decoration: TextDecoration.lineThrough,
                                   decorationThickness: 2,
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
@@ -1000,8 +1056,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: Colors.red.shade600,
-                                  borderRadius:
-                                  BorderRadius.circular(6),
+                                  borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
                                   '-$discountPct%',
@@ -1016,7 +1071,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           )
                               : Text(
                             '฿ ${_fmt(rawPrice)}',
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 20,
                               color: kTextDark,
@@ -1036,7 +1091,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               const SizedBox(width: 6),
                               Text(
                                 ratingVal.toStringAsFixed(1),
-                                style: TextStyle(
+                                style: const TextStyle(
                                   fontWeight: FontWeight.w600,
                                   color: kTextDark,
                                   fontSize: 13,
@@ -1052,8 +1107,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                               const Spacer(),
                               Text(
-                                'Stock: ${stock ?? '-'}',
-                                style: TextStyle(
+                                'Stock: $stock',
+                                style: const TextStyle(
                                   color: kTextDark,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
@@ -1071,7 +1126,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                           child: Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.storefront_rounded,
                                 size: 20,
                                 color: kTextDark,
@@ -1080,7 +1135,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               Expanded(
                                 child: Text(
                                   sellerName,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontWeight: FontWeight.w600,
                                     fontSize: 14,
                                     color: kTextDark,
@@ -1091,27 +1146,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 ),
                               ),
                               TextButton(
-                                onPressed: () {
-                                  // Try from your loaded product first (rename `_product` if yours is different)
-                                  final sellerId =
-                                      _extractSellerId(_product as Map<String, dynamic>?) ??
-                                          _extractSellerId(widget.initialData as Map<String, dynamic>?);
-
-                                  if (sellerId == null || sellerId.isEmpty) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Seller not found for this product')),
-                                    );
-                                    return;
-                                  }
-
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(builder: (_) => ProfileScreen(userId: sellerId)),
-                                  );
-                                },
+                                onPressed: _openSellerStore,
                                 style: TextButton.styleFrom(foregroundColor: kPurple),
                                 child: const Text('View shop', style: TextStyle(fontWeight: FontWeight.w600)),
                               ),
-
                             ],
                           ),
                         ),
@@ -1123,9 +1161,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 16),
 
-
-                  // Active Event Banner Section
-// ------------------- ACTIVE EVENT BANNER SECTION -------------------
+                  // ------------------- ACTIVE EVENT BANNER SECTION -------------------
                   if (_activeEventBannerUrl != null)
                     GestureDetector(
                       onTap: () {
@@ -1149,19 +1185,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           return;
                         }
 
-                        // 👉 Use PromotionScreen (your shop uses this for events)
                         Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (_) => PromotionScreen(eventId: eventId, eventName: eventName),
                           ),
                         );
-
-                        // If you prefer the products-only list screen instead, swap to:
-                        // Navigator.push(
-                        //   context,
-                        //   MaterialPageRoute(builder: (_) => EventProductsScreen(eventId: eventId)),
-                        // );
                       },
                       child: Container(
                         margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1192,8 +1221,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
 
-
-
                   /* ------------------- DESCRIPTION CARD ------------------- */
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1206,7 +1233,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        const Text(
                           'Description',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
@@ -1217,7 +1244,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         const SizedBox(height: 8),
                         Text(
                           desc.isEmpty ? 'No description' : desc,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 14,
                             height: 1.4,
                             color: kTextDark,
@@ -1244,7 +1271,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         // header row: "Comments" + view all
                         Row(
                           children: [
-                            Expanded(
+                            const Expanded(
                               child: Text(
                                 'Comments',
                                 style: TextStyle(
@@ -1258,16 +1285,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               onPressed: _openAllCommentsSheet,
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: kTextDark,
-                                side: BorderSide(
-                                  color: kBorderGrey,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
+                                side: const BorderSide(color: kBorderGrey),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
                               child: const Text(
                                 'View all',
@@ -1349,79 +1369,134 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           /* ------------------ BOTTOM ACTION BAR ------------------ */
           SafeArea(
             top: false,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              decoration: BoxDecoration(
-                color: kCardBg,
-                border: Border(
-                  top: BorderSide(
-                    color: kBorderGrey,
-                    width: 1,
-                  ),
-                ),
+            child: _bottomBar(stock),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /* -------------------- EVENT DEAL BANNER WIDGET -------------------- */
+
+  Map<String, dynamic>? _bestDiscountEvent() {
+    if (_events.isEmpty) return null;
+
+    Map<String, dynamic>? best;
+    int bestPct = -1;
+
+    for (final ev in _events) {
+      // Accept common keys for id/percent/name
+      final int? id = (ev['id'] ?? ev['event_id']) is int
+          ? (ev['id'] ?? ev['event_id']) as int
+          : int.tryParse('${ev['id'] ?? ev['event_id'] ?? ''}');
+
+      final int pct = (ev['discount_percent'] is num)
+          ? (ev['discount_percent'] as num).toInt()
+          : int.tryParse('${ev['discount_percent'] ?? 0}') ?? 0;
+
+      if (id != null && pct > bestPct) {
+        bestPct = pct;
+        best = ev;
+      }
+    }
+
+    // fall back to first event if all percents are invalid
+    return best ?? _events.first;
+  }
+
+  Widget _hiddenBannerForAdminsAndSeller() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: kPurple.withOpacity(0.25),
+        border: Border(bottom: BorderSide(color: kBorderGrey)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.visibility_off_rounded, color: kPurpleDark),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Hidden from buyers (out of stock).',
+              style: TextStyle(fontWeight: FontWeight.w700, color: kTextDark),
+            ),
+          ),
+          TextButton(
+            onPressed: _openSellerStore,
+            style: TextButton.styleFrom(foregroundColor: kPurpleDark),
+            child: const Text('Manage stock'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bottomBar(int stock) {
+    final blocked = stock <= 0; // block for everyone if out of stock
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: kCardBg,
+        border: Border(top: BorderSide(color: kBorderGrey, width: 1)),
+      ),
+      child: Row(
+        children: [
+          // favourite button
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: kBorderGrey),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              onPressed: _togglingFav ? null : _toggleFavWithConfirm,
+              icon: Icon(
+                _isFavourite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                color: _isFavourite ? Colors.red : kPurple,
               ),
-              child: Row(
-                children: [
-                  // favourite button
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: kBorderGrey),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      onPressed: _togglingFav ? null : _toggleFavWithConfirm,
-                      icon: Icon(
-                        _isFavourite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                        color: _isFavourite ? Colors.red : kPurple,
-                      ),
-                      tooltip: _isFavourite ? 'Remove from favourites' : 'Add to favourites',
-                    ),
-                  ),
+              tooltip: _isFavourite ? 'Remove from favourites' : 'Add to favourites',
+            ),
+          ),
 
-                  const SizedBox(width: 12),
+          const SizedBox(width: 12),
 
-                  // add to cart
+          // add to cart
+          Expanded(
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: blocked ? Colors.grey : kTextDark,
+                side: BorderSide(color: blocked ? Colors.grey.shade400 : kBorderGrey),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: blocked ? null : _handleAddToCart,
+              child: Text(
+                blocked ? 'Out of stock' : 'Add to cart',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
 
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: kTextDark,
-                        side: BorderSide(color: kBorderGrey),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: _handleAddToCart,   // ✅ this imports the product into the cart
-                      child: const Text('Add to cart', style: TextStyle(fontWeight: FontWeight.w600)),
-                    ),
-                  ),
+          const SizedBox(width: 12),
 
-                  const SizedBox(width: 12),
-
-                  // buy now
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kPurpleDark,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: () {
-                        // TODO: checkout logic
-                      },
-                      child: const Text(
-                        'Buy now',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+          // buy now
+          Expanded(
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: blocked ? Colors.grey.shade400 : kPurpleDark,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: blocked
+                  ? null
+                  : () {
+                // TODO: navigate to checkout with single-item intent
+              },
+              child: Text(
+                blocked ? 'Unavailable' : 'Buy now',
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -1430,85 +1505,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 }
-
-/* -------------------- EVENT DEAL BANNER WIDGET -------------------- */
-
-class _EventDealBanner extends StatelessWidget {
-  final List<Map<String, dynamic>> events;
-  final VoidCallback onBannerTap;
-  final Color purple;
-  final Color purpleDark;
-
-  const _EventDealBanner({
-    required this.events,
-    required this.onBannerTap,
-    required this.purple,
-    required this.purpleDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Find the best discount event
-    int bestPct = 0;
-    String bannerUrl = '';
-    String eventName = '';
-
-    for (final ev in events) {
-      final pctRaw = ev['discount_percent'];
-      final pct = pctRaw is num ? pctRaw.toInt() : int.tryParse(pctRaw?.toString() ?? '0') ?? 0;
-      if (pct > bestPct) {
-        bestPct = pct;
-        eventName = ev['event_name'] ?? 'Event';
-        bannerUrl = ev['banner_image_url'] ?? '';
-      }
-    }
-
-    return bannerUrl.isNotEmpty
-        ? GestureDetector(
-      onTap: onBannerTap,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: purpleDark,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Image.network(bannerUrl), // Display banner image
-            const SizedBox(height: 8),
-            Text(
-              '$eventName - up to -$bestPct%',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: onBannerTap,
-              child: const Text(
-                'View available coupons',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    )
-        : const SizedBox.shrink(); // Don't show anything if no banner URL
-  }
-}
-
-
-
-
 
 /* ---------------------- RELATED PRODUCT CARD ---------------------- */
 
@@ -1555,10 +1551,7 @@ class _RelatedProductCard extends StatelessWidget {
     final isEvent = (data['is_event'] == true);
     final discountPercent = data['discount_percent'] is int
         ? data['discount_percent'] as int
-        : int.tryParse(
-      '${data['discount_percent'] ?? 0}',
-    ) ??
-        0;
+        : int.tryParse('${data['discount_percent'] ?? 0}') ?? 0;
 
     final bool hasDiscount =
         isEvent && discountPercent > 0 && priceRaw > 0;
@@ -1581,15 +1574,13 @@ class _RelatedProductCard extends StatelessWidget {
         width: 160,
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius:
-          BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: Colors.grey.shade300,
           ),
         ),
         child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             AspectRatio(
               aspectRatio: 1,
@@ -1597,25 +1588,16 @@ class _RelatedProductCard extends StatelessWidget {
                 children: [
                   Positioned.fill(
                     child: ClipRRect(
-                      borderRadius:
-                      const BorderRadius.only(
-                        topLeft:
-                        Radius.circular(
-                            12),
-                        topRight:
-                        Radius.circular(
-                            12),
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(12),
+                        topRight: Radius.circular(12),
                       ),
                       child: img == null
                           ? Container(
-                        color: Colors
-                            .grey
-                            .shade200,
-                        child:
-                        const Icon(
+                        color: Colors.grey.shade200,
+                        child: const Icon(
                           Icons.image_not_supported_outlined,
-                          color:
-                          Colors.grey,
+                          color: Colors.grey,
                         ),
                       )
                           : Image.network(
@@ -1629,36 +1611,21 @@ class _RelatedProductCard extends StatelessWidget {
                       left: 8,
                       top: 8,
                       child: Container(
-                        padding:
-                        const EdgeInsets
-                            .symmetric(
+                        padding: const EdgeInsets.symmetric(
                           horizontal: 6,
                           vertical: 3,
                         ),
-                        decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .black
-                              .withOpacity(
-                              0.7),
-                          borderRadius:
-                          BorderRadius
-                              .circular(
-                              8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           category,
-                          style:
-                          const TextStyle(
-                            color: Colors
-                                .white,
-                            fontSize:
-                            10,
-                            fontWeight:
-                            FontWeight
-                                .w600,
-                            height:
-                            1.0,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            height: 1.0,
                           ),
                         ),
                       ),
@@ -1668,35 +1635,21 @@ class _RelatedProductCard extends StatelessWidget {
                       right: 8,
                       top: 8,
                       child: Container(
-                        padding:
-                        const EdgeInsets
-                            .symmetric(
+                        padding: const EdgeInsets.symmetric(
                           horizontal: 6,
                           vertical: 3,
                         ),
-                        decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .red
-                              .shade600,
-                          borderRadius:
-                          BorderRadius
-                              .circular(
-                              8),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade600,
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           '-$discountPercent%',
-                          style:
-                          const TextStyle(
-                            color: Colors
-                                .white,
-                            fontSize:
-                            10,
-                            fontWeight:
-                            FontWeight
-                                .w800,
-                            height:
-                            1.0,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            height: 1.0,
                           ),
                         ),
                       ),
@@ -1705,140 +1658,76 @@ class _RelatedProductCard extends StatelessWidget {
               ),
             ),
             Padding(
-              padding:
-              const EdgeInsets
-                  .fromLTRB(
-                10,
-                8,
-                10,
-                8,
-              ),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
-                mainAxisSize:
-                MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     name,
                     maxLines: 1,
-                    overflow:
-                    TextOverflow
-                        .ellipsis,
-                    style:
-                    const TextStyle(
-                      fontWeight:
-                      FontWeight
-                          .w600,
-                      fontSize:
-                      13,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
                     ),
                   ),
-                  const SizedBox(
-                      height: 4),
+                  const SizedBox(height: 4),
                   hasDiscount
                       ? Row(
-                    mainAxisSize:
-                    MainAxisSize
-                        .min,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         '฿ ${fmtBaht(discounted)}',
                         maxLines: 1,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                        style:
-                        const TextStyle(
-                          color:
-                          Colors.red,
-                          fontWeight:
-                          FontWeight
-                              .w800,
-                          fontSize:
-                          14,
-                          height:
-                          1.0,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          height: 1.0,
                         ),
                       ),
-                      const SizedBox(
-                          width:
-                          6),
+                      const SizedBox(width: 6),
                       Text(
                         '฿ ${fmtBaht(priceRaw)}',
                         maxLines: 1,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                        style:
-                        TextStyle(
-                          color: Colors
-                              .grey
-                              .shade600,
-                          decoration:
-                          TextDecoration
-                              .lineThrough,
-                          decorationThickness:
-                          2,
-                          fontWeight:
-                          FontWeight
-                              .w600,
-                          fontSize:
-                          11,
-                          height:
-                          1.0,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          decoration: TextDecoration.lineThrough,
+                          decorationThickness: 2,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                          height: 1.0,
                         ),
                       ),
                     ],
                   )
                       : Text(
-                    priceRaw == 0
-                        ? ''
-                        : '฿ ${fmtBaht(priceRaw)}',
+                    priceRaw == 0 ? '' : '฿ ${fmtBaht(priceRaw)}',
                     maxLines: 1,
-                    overflow:
-                    TextOverflow
-                        .ellipsis,
-                    style:
-                    const TextStyle(
-                      fontWeight:
-                      FontWeight
-                          .w700,
-                      fontSize:
-                      14,
-                      height:
-                      1.0,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      height: 1.0,
                     ),
                   ),
-                  const SizedBox(
-                      height: 6),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
-                      Icon(
-                        Icons
-                            .storefront_rounded,
-                        size: 13,
-                        color: Colors
-                            .grey
-                            .shade700,
-                      ),
-                      const SizedBox(
-                          width: 6),
+                      Icon(Icons.storefront_rounded, size: 13, color: Colors.grey.shade700),
+                      const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           sellerNameFromRow,
                           maxLines: 1,
-                          overflow:
-                          TextOverflow
-                              .ellipsis,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors
-                                .grey
-                                .shade700,
-                            height:
-                            1.0,
+                            color: Colors.grey.shade700,
+                            height: 1.0,
                           ),
                         ),
                       ),
@@ -1887,16 +1776,13 @@ class _CommentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding:
-      const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 16),
       child: Row(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           CircleAvatar(
             radius: 18,
-            backgroundColor:
-            Colors.grey.shade300,
+            backgroundColor: Colors.grey.shade300,
             child: const Icon(
               Icons.person,
               color: Colors.white,
@@ -1906,23 +1792,14 @@ class _CommentTile extends StatelessWidget {
 
           Expanded(
             child: Container(
-              padding:
-              const EdgeInsets.all(
-                  12),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: subtleBg,
-                borderRadius:
-                BorderRadius
-                    .circular(
-                    12),
-                border: Border.all(
-                    color:
-                    borderGrey),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: borderGrey),
               ),
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Name + timestamp
                   Row(
@@ -1930,116 +1807,63 @@ class _CommentTile extends StatelessWidget {
                       Expanded(
                         child: Text(
                           authorName,
-                          style:
-                          TextStyle(
-                            fontWeight:
-                            FontWeight
-                                .w600,
-                            fontSize:
-                            13,
-                            color:
-                            textDark,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: textDark,
                           ),
                         ),
                       ),
                       Text(
                         createdAt,
-                        style:
-                        TextStyle(
-                          fontSize:
-                          11,
-                          color:
-                          textLight,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: textLight,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(
-                      height:
-                      8),
+                  const SizedBox(height: 8),
 
                   // Comment text
                   Text(
                     content,
-                    style:
-                    TextStyle(
-                      color:
-                      textDark,
-                      fontSize:
-                      14,
-                      height:
-                      1.4,
+                    style: TextStyle(
+                      color: textDark,
+                      fontSize: 14,
+                      height: 1.4,
                     ),
                   ),
 
                   // Edit / Delete for own comment
                   if (canEdit) ...[
-                    const SizedBox(
-                        height:
-                        8),
+                    const SizedBox(height: 8),
                     Row(
-                      mainAxisAlignment:
-                      MainAxisAlignment
-                          .end,
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         TextButton(
-                          style:
-                          TextButton.styleFrom(
-                            padding:
-                            const EdgeInsets.symmetric(
-                              horizontal:
-                              8,
-                              vertical:
-                              4,
-                            ),
-                            minimumSize:
-                            Size
-                                .zero,
-                            foregroundColor:
-                            purple,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
+                            foregroundColor: purple,
                           ),
-                          onPressed:
-                          onEdit,
-                          child:
-                          const Text(
+                          onPressed: onEdit,
+                          child: const Text(
                             'Edit',
-                            style:
-                            TextStyle(
-                              fontSize:
-                              12,
-                            ),
+                            style: TextStyle(fontSize: 12),
                           ),
                         ),
-                        const SizedBox(
-                            width:
-                            8),
+                        const SizedBox(width: 8),
                         TextButton(
-                          style:
-                          TextButton.styleFrom(
-                            foregroundColor:
-                            Colors
-                                .red,
-                            padding:
-                            const EdgeInsets.symmetric(
-                              horizontal:
-                              8,
-                              vertical:
-                              4,
-                            ),
-                            minimumSize:
-                            Size
-                                .zero,
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
                           ),
-                          onPressed:
-                          onDelete,
-                          child:
-                          const Text(
+                          onPressed: onDelete,
+                          child: const Text(
                             'Delete',
-                            style:
-                            TextStyle(
-                              fontSize:
-                              12,
-                            ),
+                            style: TextStyle(fontSize: 12),
                           ),
                         ),
                       ],
@@ -2072,8 +1896,7 @@ class _CommentsSheet extends StatefulWidget {
   final Future<void> Function(
       Map<String, dynamic> commentRow,
       ) onRequestEditComment;
-  final Future<void> Function(int commentId)
-  onRequestDeleteComment;
+  final Future<void> Function(int commentId) onRequestDeleteComment;
 
   const _CommentsSheet({
     required this.productId,
@@ -2088,18 +1911,15 @@ class _CommentsSheet extends StatefulWidget {
   });
 
   @override
-  State<_CommentsSheet> createState() =>
-      _CommentsSheetState();
+  State<_CommentsSheet> createState() => _CommentsSheetState();
 }
 
-class _CommentsSheetState
-    extends State<_CommentsSheet> {
+class _CommentsSheetState extends State<_CommentsSheet> {
   bool _loading = true;
   String? _err;
   List<Map<String, dynamic>> _all = [];
 
-  final TextEditingController _sheetCommentCtrl =
-  TextEditingController();
+  final TextEditingController _sheetCommentCtrl = TextEditingController();
   bool _sendingNew = false;
 
   @override
@@ -2208,17 +2028,10 @@ class _CommentsSheetState
           left: 16,
           right: 16,
           top: 12,
-          bottom:
-          MediaQuery.of(context)
-              .padding
-              .bottom +
-              16,
+          bottom: MediaQuery.of(context).padding.bottom + 16,
         ),
         child: SizedBox(
-          height: MediaQuery.of(context)
-              .size
-              .height *
-              0.7,
+          height: MediaQuery.of(context).size.height * 0.7,
           child: Column(
             crossAxisAlignment:
             CrossAxisAlignment.start,
@@ -2228,14 +2041,9 @@ class _CommentsSheetState
                 child: Container(
                   width: 40,
                   height: 4,
-                  decoration:
-                  BoxDecoration(
-                    color:
-                    Colors.grey.shade400,
-                    borderRadius:
-                    BorderRadius
-                        .circular(
-                        999),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(999),
                   ),
                 ),
               ),
@@ -2244,8 +2052,7 @@ class _CommentsSheetState
               Text(
                 'All comments',
                 style: TextStyle(
-                  fontWeight:
-                  FontWeight.w600,
+                  fontWeight: FontWeight.w600,
                   color: textDark,
                   fontSize: 16,
                 ),
@@ -2256,16 +2063,13 @@ class _CommentsSheetState
               // input row to post new comment
               Row(
                 crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
+                CrossAxisAlignment.start,
                 children: [
                   CircleAvatar(
                     radius: 18,
                     backgroundColor:
-                    Colors.grey
-                        .shade300,
-                    child:
-                    const Icon(
+                    Colors.grey.shade300,
+                    child: const Icon(
                       Icons.person,
                       color: Colors.white,
                     ),
@@ -2282,108 +2086,66 @@ class _CommentsSheetState
                           InputDecoration(
                             hintText:
                             'Write a comment...',
-                            hintStyle:
-                            TextStyle(
-                              color:
-                              textLight,
+                            hintStyle: TextStyle(
+                              color: textLight,
                             ),
-                            filled:
-                            true,
-                            fillColor:
-                            Colors
-                                .white,
+                            filled: true,
+                            fillColor: Colors.white,
                             contentPadding:
                             const EdgeInsets
                                 .symmetric(
-                              horizontal:
-                              12,
-                              vertical:
-                              12,
+                              horizontal: 12,
+                              vertical: 12,
                             ),
                             enabledBorder:
                             OutlineInputBorder(
                               borderRadius:
-                              BorderRadius.circular(
-                                  8),
-                              borderSide:
-                              BorderSide(
-                                color:
-                                borderGrey,
-                                width:
-                                1.2,
+                              BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                color: borderGrey,
+                                width: 1.2,
                               ),
                             ),
                             focusedBorder:
                             OutlineInputBorder(
                               borderRadius:
-                              BorderRadius.circular(
-                                  8),
-                              borderSide:
-                              BorderSide(
-                                color:
-                                purpleDark,
-                                width:
-                                1.2,
+                              BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                color: purpleDark,
+                                width: 1.2,
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(
-                            height:
-                            8),
+                        const SizedBox(height: 8),
                         Align(
-                          alignment:
-                          Alignment
-                              .centerRight,
-                          child:
-                          ElevatedButton(
-                            onPressed:
-                            _sendingNew
-                                ? null
-                                : _handlePostNew,
-                            style: ElevatedButton
-                                .styleFrom(
-                              backgroundColor:
-                              purpleDark,
-                              foregroundColor:
-                              Colors
-                                  .white,
-                              padding:
-                              const EdgeInsets
-                                  .symmetric(
-                                horizontal:
-                                16,
-                                vertical:
-                                10,
+                          alignment: Alignment.centerRight,
+                          child: ElevatedButton(
+                            onPressed: _sendingNew ? null : _handlePostNew,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: purpleDark,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
                               ),
-                              shape:
-                              RoundedRectangleBorder(
-                                borderRadius:
-                                BorderRadius.circular(
-                                    10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
                               ),
                             ),
-                            child:
-                            _sendingNew
+                            child: _sendingNew
                                 ? const SizedBox(
-                              width:
-                              16,
-                              height:
-                              16,
-                              child:
-                              CircularProgressIndicator(
-                                strokeWidth:
-                                2,
-                                color:
-                                Colors.white,
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
                               ),
                             )
                                 : const Text(
                               'Post',
-                              style:
-                              TextStyle(
-                                fontWeight:
-                                FontWeight.w600,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
@@ -2395,107 +2157,58 @@ class _CommentsSheetState
               ),
 
               const SizedBox(height: 16),
-              Divider(
-                  height: 1,
-                  color: borderGrey),
+              Divider(height: 1, color: borderGrey),
               const SizedBox(height: 12),
 
               if (_loading)
                 const Center(
                   child: Padding(
-                    padding:
-                    EdgeInsets.all(
-                        24),
-                    child:
-                    CircularProgressIndicator(),
+                    padding: EdgeInsets.all(24),
+                    child: CircularProgressIndicator(),
                   ),
                 )
               else if (_err != null)
                 Padding(
-                  padding:
-                  const EdgeInsets
-                      .all(24.0),
+                  padding: const EdgeInsets.all(24.0),
                   child: Text(
                     'Error loading comments:\n$_err',
-                    style:
-                    const TextStyle(
-                      color:
-                      Colors.red,
+                    style: const TextStyle(
+                      color: Colors.red,
                     ),
                   ),
                 )
               else if (_all.isEmpty)
                   Padding(
-                    padding:
-                    const EdgeInsets
-                        .all(24.0),
+                    padding: const EdgeInsets.all(24.0),
                     child: Text(
                       'No comments yet.',
-                      style:
-                      TextStyle(
-                        color:
-                        textLight,
-                        fontSize:
-                        14,
+                      style: TextStyle(
+                        color: textLight,
+                        fontSize: 14,
                       ),
                     ),
                   )
                 else
                   Expanded(
-                    child:
-                    ListView.builder(
-                      itemCount:
-                      _all.length,
-                      itemBuilder:
-                          (context,
-                          index) {
-                        final c =
-                        _all[index];
-                        final mine =
-                            c['is_mine'] ==
-                                true;
-                        final cmtId =
-                        c['id']
-                        as int?;
+                    child: ListView.builder(
+                      itemCount: _all.length,
+                      itemBuilder: (context, index) {
+                        final c = _all[index];
+                        final mine = c['is_mine'] == true;
+                        final cmtId = c['id'] as int?;
 
                         return _CommentTile(
-                          authorName: (c['author_name'] ??
-                              'User')
-                              .toString(),
-                          content: (c['content'] ??
-                              '')
-                              .toString(),
-                          createdAt:
-                          (c['created_at'] ??
-                              '')
-                              .toString(),
-                          canEdit:
-                          mine,
-                          purple:
-                          purple,
-                          borderGrey:
-                          borderGrey,
-                          subtleBg:
-                          subtleBg,
-                          textDark:
-                          textDark,
-                          textLight:
-                          textLight,
-                          onEdit: (mine &&
-                              cmtId !=
-                                  null)
-                              ? () => _handleEdit(
-                            c,
-                          )
-                              : null,
-                          onDelete:
-                          (mine &&
-                              cmtId !=
-                                  null)
-                              ? () => _handleDelete(
-                            cmtId,
-                          )
-                              : null,
+                          authorName: (c['author_name'] ?? 'User').toString(),
+                          content: (c['content'] ?? '').toString(),
+                          createdAt: (c['created_at'] ?? '').toString(),
+                          canEdit: mine,
+                          purple: purple,
+                          borderGrey: borderGrey,
+                          subtleBg: subtleBg,
+                          textDark: textDark,
+                          textLight: textLight,
+                          onEdit: (mine && cmtId != null) ? () => _handleEdit(c) : null,
+                          onDelete: (mine && cmtId != null) ? () => _handleDelete(cmtId) : null,
                         );
                       },
                     ),

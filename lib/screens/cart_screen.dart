@@ -53,12 +53,13 @@ class _CartScreenState extends State<CartScreen> {
     });
 
     try {
+      // Make sure SupabaseService.fetchCartItems returns product stock!
       final list = await SupabaseService.fetchCartItems();
       if (!mounted) return;
       setState(() => _items = List<Map<String, dynamic>>.from(list));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = _friendlyMessage(e) ?? e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -105,6 +106,17 @@ class _CartScreenState extends State<CartScreen> {
     return total;
   }
 
+  // Prevent checkout if anything is invalid (out of stock or qty > stock)
+  bool get _hasInvalidItems {
+    for (final row in _items) {
+      final p = (row['product'] ?? {}) as Map<String, dynamic>;
+      final stock = _parseInt(p['stock']); // may be 0 if missing
+      final qty = _parseInt(row['qty']);
+      if (stock <= 0 || (stock > 0 && qty > stock)) return true;
+    }
+    return false;
+  }
+
   String? _firstImage(dynamic value) {
     if (value is List) {
       final list = value
@@ -115,6 +127,31 @@ class _CartScreenState extends State<CartScreen> {
     }
     if (value is String && value.trim().isNotEmpty) return value;
     return null;
+  }
+
+  /* --------------------------- Error helpers -------------------------------- */
+
+  String? _friendlyMessage(Object e) {
+    if (e is PostgrestException) {
+      // Supabase Dart exposes code/message. P0001 is RAISE EXCEPTION from trigger.
+      final code = e.code ?? '';
+      final msg = (e.message ?? '').trim();
+      if (msg.isNotEmpty) return msg; // e.g. "Product 37 is out of stock"
+      if (code == 'P0001') return 'Action blocked by database rule.';
+      return 'Database error${code.isNotEmpty ? ' ($code)' : ''}.';
+    }
+    return null;
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: kPurple,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   /* --------------------------- Quantity operations -------------------------- */
@@ -131,14 +168,19 @@ class _CartScreenState extends State<CartScreen> {
     final current = _parseInt(row['qty']);
     final next = current + 1;
 
+    // UI-side guard
     if (stock > 0 && next > stock) {
-      if (!mounted) return;
       _toast('Only $stock in stock.');
       return;
     }
 
-    await SupabaseService.updateCartQty(productId: productId, qty: next);
-    await _fetch();
+    try {
+      await SupabaseService.updateCartQty(productId: productId, qty: next);
+      await _fetch();
+    } catch (e) {
+      _toast(_friendlyMessage(e) ?? 'Failed to update quantity.');
+      await _fetch(); // refresh to real state
+    }
   }
 
   Future<void> _dec(int productId) async {
@@ -151,33 +193,37 @@ class _CartScreenState extends State<CartScreen> {
     final current = _parseInt(row['qty']);
     final next = current - 1;
 
-    if (next <= 0) {
-      await SupabaseService.removeFromCart(productId: productId);
-    } else {
-      await SupabaseService.updateCartQty(productId: productId, qty: next);
+    try {
+      if (next <= 0) {
+        await SupabaseService.removeFromCart(productId: productId);
+      } else {
+        await SupabaseService.updateCartQty(productId: productId, qty: next);
+      }
+      await _fetch();
+    } catch (e) {
+      _toast(_friendlyMessage(e) ?? 'Failed to update quantity.');
+      await _fetch();
     }
-    await _fetch();
   }
 
   Future<void> _remove(int productId) async {
-    await SupabaseService.removeFromCart(productId: productId);
-    await _fetch();
+    try {
+      await SupabaseService.removeFromCart(productId: productId);
+      await _fetch();
+    } catch (e) {
+      _toast(_friendlyMessage(e) ?? 'Failed to remove item.');
+      await _fetch();
+    }
   }
 
   Future<void> _clear() async {
-    await SupabaseService.clearCart();
-    await _fetch();
-  }
-
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: kPurple,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
+    try {
+      await SupabaseService.clearCart();
+      await _fetch();
+    } catch (e) {
+      _toast(_friendlyMessage(e) ?? 'Failed to clear cart.');
+      await _fetch();
+    }
   }
 
   /* ---------------------------------- UI ----------------------------------- */
@@ -202,8 +248,7 @@ class _CartScreenState extends State<CartScreen> {
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 140),
         itemBuilder: (context, i) {
           final row = _items[i];
-          final p =
-          (row['product'] ?? {}) as Map<String, dynamic>;
+          final p = (row['product'] ?? {}) as Map<String, dynamic>;
           final pid = p['id'] as int?;
           if (pid == null) return const SizedBox.shrink();
 
@@ -216,8 +261,7 @@ class _CartScreenState extends State<CartScreen> {
           final stock = _parseInt(p['stock']);
           final outOfStock = stock <= 0;
           final reachedMax = !outOfStock && qty >= stock;
-          final canInc =
-          !(outOfStock || (stock > 0 && qty >= stock));
+          final canInc = !(outOfStock || (stock > 0 && qty >= stock));
 
           // small warning text
           String? warn;
@@ -287,8 +331,7 @@ class _CartScreenState extends State<CartScreen> {
           leading: IconButton(
             tooltip: 'Back to Home',
             icon: const Icon(Icons.arrow_back),
-            onPressed: () =>
-                Navigator.of(context).popUntil((r) => r.isFirst),
+            onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
           ),
           actions: [
             if (_items.isNotEmpty)
@@ -316,6 +359,10 @@ class _CartScreenState extends State<CartScreen> {
             : _SubtotalBar(
           subtotalText: '฿ ${_fmtBaht(_subtotal)}',
           onCheckout: () {
+            if (_hasInvalidItems) {
+              _toast('Some items are unavailable or exceed stock. Please adjust your cart.');
+              return;
+            }
             Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const CheckoutScreen()),
@@ -488,8 +535,7 @@ class _CartCard extends StatelessWidget {
                         const Spacer(),
                         IconButton(
                           tooltip: 'Remove',
-                          icon:
-                          const Icon(Icons.delete_outline, color: Colors.red),
+                          icon: const Icon(Icons.delete_outline, color: Colors.red),
                           onPressed: onRemove,
                         ),
                       ],
@@ -498,8 +544,7 @@ class _CartCard extends StatelessWidget {
                     if (warning != null) ...[
                       const SizedBox(height: 6),
                       Container(
-                        padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFFF5E5),
                           borderRadius: BorderRadius.circular(10),

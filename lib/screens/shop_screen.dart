@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/supabase_service.dart';
-import '../services/voucher_service.dart'; // <-- NEW: live coupons service
+import '../services/voucher_service.dart'; // <-- live coupons service
 import '../features/profile/voucher_screen.dart';
 import 'promotion_screen.dart';
 import 'product_detail_screen.dart';
@@ -19,6 +19,43 @@ void _openFavourites(BuildContext context) {
   Navigator.of(context).push(
     MaterialPageRoute(builder: (_) => const FavouriteScreen()),
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        OUT-OF-STOCK VISIBILITY HELPERS                     */
+/* -------------------------------------------------------------------------- */
+
+bool _isAdminViewer() => SupabaseService.isAdmin;
+String? _viewerUid() => SupabaseService.currentUserId;
+
+int _asInt(dynamic v) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v) ?? 0;
+  return 0;
+}
+
+/// Filter a list of products so buyers only see stock>0.
+/// Admin or product owner still see everything.
+List<Map<String, dynamic>> _visibleToViewer(List<Map<String, dynamic>> raw) {
+  final isAdmin = _isAdminViewer();
+  final me = _viewerUid();
+  return raw.where((p) {
+    final stock = _asInt(p['stock']);
+    final sellerId = p['seller_id']?.toString();
+    if (isAdmin || (me != null && me == sellerId)) return true; // admin/owner
+    return stock > 0; // buyer: only in-stock
+  }).toList();
+}
+
+/// true = viewer should be blocked from opening detail on this product
+bool _isOutOfStockForViewer(Map<String, dynamic> p) {
+  final stock = _asInt(p['stock']);
+  if (stock > 0) return false;
+  final me = _viewerUid();
+  final sellerId = p['seller_id']?.toString();
+  if (_isAdminViewer() || (me != null && me == sellerId)) return false;
+  return true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -254,7 +291,7 @@ class _BuyHomeState extends State<_BuyHome> {
         ascending: false,
       );
       if (!mounted) return;
-      setState(() => _recommended = list);
+      setState(() => _recommended = _visibleToViewer(list)); // filter here
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -378,7 +415,7 @@ class _BuyHomeState extends State<_BuyHome> {
             ),
           ),
           const SizedBox(height: 8),
-          const CouponsSection(), // <-- NEW live section
+          const CouponsSection(), // live section
 
           const SizedBox(height: 16),
 
@@ -797,12 +834,22 @@ class _ProductCard extends StatelessWidget {
         data['seller_name'])
         ?.toString();
 
+    final stock = _asInt(data['stock']);
+    final showOutBadge =
+        stock <= 0 && !_isOutOfStockForViewer(data); // admin/owner badge
+
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
+          if (_isOutOfStockForViewer(data)) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Out of stock')),
+            );
+            return;
+          }
           Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => ProductDetailScreen(
@@ -841,6 +888,28 @@ class _ProductCard extends StatelessWidget {
                       right: 8,
                       top: 8,
                       child: _DiscountBadge(percent: discountPercent),
+                    ),
+                  if (showOutBadge)
+                    Positioned(
+                      left: 8,
+                      top: 8 + (category.isNotEmpty ? 28 : 0),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.70),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'OUT OF STOCK',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
                     ),
                 ],
               ),
@@ -982,14 +1051,16 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
         ascending: false,
       );
 
-      // ensure only correct category (safety)
+      // ensure only correct category (safety) + apply visibility
       final cleaned = fetched.where((p) {
         final cat = (p['category'] ?? '').toString().trim();
         return cat == widget.category;
       }).toList();
 
+      final visible = _visibleToViewer(cleaned);
+
       if (!mounted) return;
-      setState(() => _items = cleaned);
+      setState(() => _items = visible);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -1095,7 +1166,7 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
         ascending: ascending,
       );
       if (!mounted) return;
-      setState(() => _items = list);
+      setState(() => _items = _visibleToViewer(list)); // filter here
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -1913,7 +1984,7 @@ class _SellerNameState extends State<_SellerName> {
   }
 }
 
-/* ----------------------- LIVE COUPONS UI (Lucid Purple, no code pill) ----------------------- */
+/* ----------------------- LIVE COUPONS UI (Lucid Purple) -------------------- */
 
 class CouponsSection extends StatefulWidget {
   const CouponsSection({super.key});
@@ -1924,14 +1995,16 @@ class CouponsSection extends StatefulWidget {
 /* local tokens */
 const _lcPrimary = Color(0xFF7C3AED);
 const _lcPrimary2 = Color(0xFF9B8AFB);
-const _lcMuted   = Color(0xFF6B7280);
-const _lcDanger  = Color(0xFFE11D48);
+const _lcMuted = Color(0xFF6B7280);
+const _lcDanger = Color(0xFFE11D48);
 
 BoxDecoration _lcGlass([double r = 12]) => BoxDecoration(
   color: Colors.white,
   borderRadius: BorderRadius.circular(r),
   border: Border.all(color: const Color(0x11000000)),
-  boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 6))],
+  boxShadow: const [
+    BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 6))
+  ],
 );
 
 class _CouponsSectionState extends State<CouponsSection> {
@@ -1951,7 +2024,7 @@ class _CouponsSectionState extends State<CouponsSection> {
 
   String _subtitle(Map<String, dynamic> c) {
     final type = (c['discount_type'] ?? '').toString();
-    final val  = c['discount_value'];
+    final val = c['discount_value'];
     if (type == 'percent') {
       final pct = int.tryParse('$val') ?? 0;
       return 'Save $pct%';
@@ -2015,9 +2088,9 @@ class _CouponsSectionState extends State<CouponsSection> {
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemCount: coupons.length,
             itemBuilder: (context, i) {
-              final c     = coupons[i];
+              final c = coupons[i];
               final title = (c['title'] ?? 'Coupon').toString();
-              final code  = (c['code']  ?? '').toString(); // still used internally
+              final code = (c['code'] ?? '').toString();
 
               return Container(
                 width: 240,
@@ -2033,9 +2106,11 @@ class _CouponsSectionState extends State<CouponsSection> {
                           padding: const EdgeInsets.all(6),
                           decoration: const BoxDecoration(
                             shape: BoxShape.circle,
-                            gradient: LinearGradient(colors: [_lcPrimary, _lcPrimary2]),
+                            gradient:
+                            LinearGradient(colors: [_lcPrimary, _lcPrimary2]),
                           ),
-                          child: const Icon(Icons.local_offer_rounded, color: Colors.white, size: 16),
+                          child: const Icon(Icons.local_offer_rounded,
+                              color: Colors.white, size: 16),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -2091,7 +2166,8 @@ class _CouponsSectionState extends State<CouponsSection> {
                         },
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
                           foregroundColor: Colors.white,
                           backgroundColor: _lcPrimary,
                         ),
@@ -2108,7 +2184,6 @@ class _CouponsSectionState extends State<CouponsSection> {
     );
   }
 }
-
 
 /* ------------------------------ INPUT WIDGETS ------------------------------ */
 
@@ -2288,7 +2363,7 @@ class _SearchList extends StatelessWidget {
     // 2. Cast once
     final list = (rows as List).cast<Map<String, dynamic>>();
 
-    // 3. Local text filter (because we can't ilike/or easily on your SDK)
+    // 3. Local text filter
     final q = queryText.trim().toLowerCase();
     final filtered = q.isEmpty
         ? list
@@ -2314,7 +2389,7 @@ class _SearchList extends StatelessWidget {
       }
     }
 
-    // 5. 🔥 Pull best discount for each product from product_events
+    // 5. Pull best discount for each product from product_events
     final productIds =
     filtered.map((p) => p['id']).whereType<int>().toList();
 
@@ -2329,7 +2404,9 @@ class _SearchList extends StatelessWidget {
       }
     }
 
-    return filtered;
+    // 6. Apply visibility rule so buyers don't see stock=0 in search either
+    final visible = _visibleToViewer(filtered);
+    return visible;
   }
 
   @override
