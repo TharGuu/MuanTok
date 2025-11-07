@@ -1,6 +1,7 @@
 // lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'orders/orders_list_screen.dart';
 
 // ✅ keep only one SignIn import
 import 'signin_screen.dart'; // provides SignInScreen
@@ -356,6 +357,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 if (_isSelf) ...[
                   _SectionHeader(title: 'Account Actions'),
+
+                  _ActionTile(
+                    title: 'My Orders',
+                    icon: Icons.local_shipping_outlined,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const OrdersListScreen()),
+                      );
+                    },
+                    color: primaryPurple, // matches your theme
+                  ),
 
                   // ✅ NEW: Payment cards manager
                   _ActionTile(

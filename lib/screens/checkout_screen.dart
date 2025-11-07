@@ -533,6 +533,51 @@ product:products!cart_items_product_id_fkey(
     return null;
   }
 
+  /* --------------------- NEW: payload builders for RPC ------------------- */
+
+  List<Map<String, dynamic>> _buildItemsPayload() {
+    final list = <Map<String, dynamic>>[];
+    for (final row in _items) {
+      final p = (row['product'] ?? {}) as Map<String, dynamic>;
+      final id = _parseInt(p['id']);
+      final name = (p['name'] ?? 'Unknown').toString();
+      final qty = _parseInt(row['qty']);
+
+      // image_urls can be array or string; fallback to image_url
+      String? thumb;
+      final iu = p['image_urls'];
+      if (iu is List && iu.isNotEmpty) {
+        thumb = iu.first?.toString();
+      } else if (iu is String && iu.trim().isNotEmpty) {
+        thumb = iu;
+      } else if (p['image_url'] is String) {
+        thumb = (p['image_url'] as String);
+      }
+
+      list.add({
+        'product_id': id,
+        'name': name,
+        'thumbnail_url': thumb ?? '',
+        // use price AFTER discount/event logic
+        'unit_price': _discountedUnit(p),
+        'qty': qty,
+      });
+    }
+    return list;
+  }
+
+  Map<String, dynamic> _buildAddressPayload() {
+    return {
+      'name': _shipName ?? '',
+      'phone': _shipPhone ?? '',
+      'line1': _shipAddress ?? '',
+      'line2': '',
+      'district': null,
+      'province': null,
+      'postal': null,
+    };
+  }
+
   // ---- finalize + go success (calls Supabase RPC) ----
   Future<void> _finalizeAndGoSuccess() async {
     final uid = _sb.auth.currentUser?.id;
@@ -556,21 +601,40 @@ product:products!cart_items_product_id_fkey(
     );
 
     try {
-      final int? cpId = (_selectedCoupon?['id'] is num)
-          ? (_selectedCoupon!['id'] as num).toInt()
-          : int.tryParse('${_selectedCoupon?['id']}');
+      final items = _buildItemsPayload();
+      if (items.isEmpty) {
+        throw Exception('No items to submit.');
+      }
 
-      await _sb.rpc('finalize_cart_checkout', params: {
-        'p_user': uid,
-        'p_coupon_id': cpId,
-      });
+      final totals = {
+        'subtotal': _subtotal,
+        'shipping_fee': _deliveryFee,
+        'discount': _couponDiscount, // coupon discount already applied
+        'vat': _vat,
+        'total': _grandTotal,
+      };
+
+      final addr = _buildAddressPayload();
+      final status = _paymentMethod == 'cod' ? 'placed' : 'paid';
+
+      // 1) Create order + items + timeline + stock decrement (SERVER)
+      final _ = await _sb.rpc('create_order_tx', params: {
+        'p_address': addr,
+        'p_items': items,
+        'p_totals': totals,
+        'p_status': status,
+        'p_payment_ref': null, // set your gateway ref if you have one
+      }).select();
+
+      // 2) Clear user's cart
+      await _sb.from('cart_items').delete().eq('user_id', uid);
+
+      // 3) Mark coupon as used (CLIENT-SIDE — no SQL changes)
+      await _markSelectedCouponUsed();
 
       if (mounted) Navigator.of(context).pop(); // close loader
 
-      // Mark claim as used
-      await _markSelectedCouponUsed();
-
-      // Clean local state
+      // 4) Clean local state
       if (mounted) {
         setState(() {
           _items = [];
@@ -578,6 +642,7 @@ product:products!cart_items_product_id_fkey(
         });
       }
 
+      // 5) Go to success screen
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const PaymentSuccessScreen()),
@@ -585,7 +650,7 @@ product:products!cart_items_product_id_fkey(
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop(); // close loader
-      final msg = e.toString().contains('OUT_OF_STOCK')
+      final msg = e.toString().contains('Out of stock')
           ? 'Some items are out of stock. Please review your cart.'
           : 'Checkout failed: $e';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));

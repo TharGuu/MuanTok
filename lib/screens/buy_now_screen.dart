@@ -539,6 +539,48 @@ product_events(
     return null;
   }
 
+  /* --------------------- Payload builders (same as Checkout) ------------- */
+
+  List<Map<String, dynamic>> _buildItemsPayloadSingle() {
+    if (_items.isEmpty) return const [];
+    final p = (_items.first['product'] ?? {}) as Map<String, dynamic>;
+    final qty = _parseInt(_items.first['qty']);
+
+    String? _firstImage(dynamic value) {
+      if (value is List && value.isNotEmpty) {
+        final s = value.first?.toString();
+        return (s != null && s.isNotEmpty) ? s : null;
+      }
+      if (value is String && value.trim().isNotEmpty) return value;
+      return null;
+    }
+
+    final id = _parseInt(p['id']);
+    final name = (p['name'] ?? 'Unknown').toString();
+
+    return [
+      {
+        'product_id': id,
+        'name': name,
+        'thumbnail_url': _firstImage(p['image_urls']) ?? '',
+        'unit_price': _discountedUnit(p), // price AFTER event/discount
+        'qty': qty,
+      }
+    ];
+  }
+
+  Map<String, dynamic> _buildAddressPayload() {
+    return {
+      'name': _shipName ?? '',
+      'phone': _shipPhone ?? '',
+      'line1': _shipAddress ?? '',
+      'line2': '',
+      'district': null,
+      'province': null,
+      'postal': null,
+    };
+  }
+
   /* ------------------------ Finalize & Success -------------------------- */
 
   Future<void> _finalizeAndGoSuccess() async {
@@ -561,22 +603,43 @@ product_events(
     );
 
     try {
-      final int prodId = widget.productId;
-      final int qty = _parseInt(_items.first['qty']); // <-- use items qty
-      final int? cpId = (_selectedCoupon?['id'] is num)
-          ? (_selectedCoupon!['id'] as num).toInt()
-          : int.tryParse('${_selectedCoupon?['id']}');
+      final items = _buildItemsPayloadSingle();
+      if (items.isEmpty) {
+        throw Exception('No item to submit.');
+      }
 
-      await _sb.rpc('finalize_buy_now_checkout', params: {
-        'p_user': uid,
-        'p_product_id': prodId,
-        'p_qty': qty,
-        'p_coupon_id': cpId, // nullable
-      });
+      final totals = {
+        'subtotal': _subtotal,
+        'shipping_fee': _deliveryFee,
+        'discount': _couponDiscount,
+        'vat': _vat,
+        'total': _grandTotal,
+      };
+
+      final addr = _buildAddressPayload();
+      final status = _paymentMethod == 'cod' ? 'placed' : 'paid';
+
+      // Same RPC as Checkout
+      await _sb.rpc('create_order_tx', params: {
+        'p_address': addr,
+        'p_items': items,
+        'p_totals': totals,
+        'p_status': status,
+        'p_payment_ref': null,
+      }).select();
+
+      // Mark coupon as used (client-side convenience)
+      await _markSelectedCouponUsed();
 
       if (mounted) Navigator.of(context).pop(); // close loader
 
-      await _markSelectedCouponUsed();
+      // Reset local state (optional)
+      if (mounted) {
+        setState(() {
+          _items = [];
+          _selectedCoupon = null;
+        });
+      }
 
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
@@ -585,7 +648,7 @@ product_events(
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop();
-      final msg = e.toString().contains('OUT_OF_STOCK')
+      final msg = e.toString().contains('Out of stock')
           ? 'This item is out of stock or qty too high.'
           : 'Checkout failed: $e';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));

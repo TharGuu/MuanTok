@@ -47,6 +47,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
   RealtimeChannel? _commentChannel;
 
+  // NEW: realtime product rating channel
+  RealtimeChannel? _ratingChannel;
+
   static const int _commentPreviewLimit = 3;
 
   // brand colors
@@ -70,6 +73,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   @override
   void dispose() {
     _commentChannel?.unsubscribe();
+    _ratingChannel?.unsubscribe(); // <-- clean up rating realtime
     super.dispose();
   }
 
@@ -83,6 +87,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       await _fetchActiveEventBanner(); // pull active banner
       await _checkFav();            //
       await _loadFavouriteStatus();
+
+      // start realtime product rating subscription (after initial fetch)
+      _subscribeToProductRating();
     });
   }
 
@@ -244,6 +251,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   void _openSellerStore() {
     final sellerId =
         _extractSellerId(_product) ?? _extractSellerId(widget.initialData);
+
     if (sellerId == null || sellerId.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -252,9 +260,20 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       }
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const MyProductsScreen()),
-    );
+
+    final viewerId = Supabase.instance.client.auth.currentUser?.id;
+
+    // If you're the seller, open your own product manager.
+    if (viewerId != null && viewerId == sellerId) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const MyProductsScreen()),
+      );
+    } else {
+      // Otherwise, go to the seller's profile (their shop for viewers)
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ProfileScreen(userId: sellerId)),
+      );
+    }
   }
 
   // NEW: get banner for active event of this product (simple mapping demo)
@@ -382,9 +401,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   /* -------------------------------------------------------------------------- */
-  /*                           REALTIME COMMENT UPDATES                          */
+  /*                           REALTIME SUBSCRIPTIONS                            */
   /* -------------------------------------------------------------------------- */
 
+  // Comments realtime
   void _subscribeToComments() {
     final sb = Supabase.instance.client;
 
@@ -434,6 +454,50 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     // force-fill preview right away
     _refreshCommentsOnly();
+  }
+
+  // NEW: rating aggregate realtime (listens to products updates)
+  void _subscribeToProductRating() {
+    final sb = Supabase.instance.client;
+
+    _ratingChannel?.unsubscribe();
+
+    // If your supabase_flutter supports `filter`, you can pass it.
+    // To be 100% compatible, we also guard in the callback.
+    _ratingChannel = sb
+        .channel('product_rating_${widget.productId}')
+        .onPostgresChanges(
+      event: PostgresChangeEvent.update,
+      schema: 'public',
+      table: 'products',
+      callback: (payload) {
+        final row = payload.newRecord;
+        if (row == null) return;
+
+        // Only patch if this product row changed
+        final rid = row['id'];
+        if (rid is! int || rid != widget.productId) return;
+
+        num _numOrZero(dynamic v) {
+          if (v is num) return v;
+          if (v is String) {
+            final p = num.tryParse(v);
+            if (p != null) return p;
+          }
+          return 0;
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _product = {
+            ...?_product,
+            'rating': _numOrZero(row['rating']),
+            'rating_count': _numOrZero(row['rating_count']),
+          };
+        });
+      },
+    )
+        .subscribe();
   }
 
   /* -------------------------------------------------------------------------- */
@@ -1492,11 +1556,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ),
               onPressed: blocked
                   ? null
-                  : () {// If you already keep a qty on this screen, plug it in here.
-                // Example variable names you might already have: `_qty`, `_quantity`, `selectedQty`.
-                // If none exists yet, this defaults to 1.
+                  : () {
+                // If you already keep a qty on this screen, plug it in here.
                 final int initialQty = (() {
-                  // TODO: change `_qty` to your actual qty state variable if you have one
                   try {
                     // ignore: unnecessary_cast, avoid_dynamic_calls
                     final v = (this as dynamic)._qty;
