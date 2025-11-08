@@ -972,6 +972,37 @@ class SupabaseService {
     return {'avg': avg, 'count': count};
   }
 
+
+  // Add this to SupabaseService
+  // add product ads in watch live screen
+  static Future<List<Map<String, dynamic>>> listInStockProductsForSeller(
+      String sellerId, {int limit = 3}
+      ) async {
+    final rows = await _client
+        .from(_Config.productsTable)
+        .select('id, name, price, image_urls, stock')
+        .eq('seller_id', sellerId)
+        .gt('stock', 0)
+        .order('id', ascending: false)
+        .limit(limit);
+
+    final list = (rows as List).cast<Map<String, dynamic>>();
+    if (list.isEmpty) return list;
+
+    // Reuse your "best event discount" lookup
+    final ids = list.map((e) => e['id']).whereType<int>().toList();
+    final best = await fetchBestDiscountMapForProducts(ids);
+
+    for (final p in list) {
+      final pid = p['id'] as int?;
+      final pct = (pid != null) ? (best[pid] ?? 0) : 0;
+      p['discount_percent'] = pct;
+      p['is_event'] = pct > 0;
+    }
+    return list;
+  }
+
+
   /// Subscribe to changes in product_ratings for a product and recompute {avg,count}.
   static RealtimeChannel subscribeRatingAggregate({
     required int productId,
