@@ -1,3 +1,4 @@
+// lib/screens/event_products_screen.dart
 import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
 import 'product_detail_screen.dart';
@@ -33,10 +34,12 @@ class _EventProductsScreenState extends State<EventProductsScreen> {
     'Other',
   ];
 
-  // sort options
+  // sort options (now includes rating)
   static const List<String> _sortOptions = <String>[
     'Price: Low → High',
     'Price: High → Low',
+    'Rating: High → Low',
+    'Rating: Low → High',
   ];
 
   @override
@@ -60,10 +63,13 @@ class _EventProductsScreenState extends State<EventProductsScreen> {
     });
 
     try {
-      // pull ALL products that belong to ANY active event
-      // each product already has a discount_percent injected
+      // Pull ALL products that belong to ANY active event
+      // (each product already has a discount_percent injected by service)
       final allEventProducts =
       await SupabaseService.listAllEventProductsFlattened();
+
+      // If you want to restrict to a specific eventId, you can also
+      // filter here by checking a `event_id` field if present.
 
       // apply category filter (local)
       final filteredByCategory = _selectedCategory == 'All'
@@ -96,9 +102,23 @@ class _EventProductsScreenState extends State<EventProductsScreen> {
   void _applyFiltersLocally() {
     if (mounted) {
       setState(() {
-        // just trigger rebuild so _visibleItems recomputes
+        // trigger rebuild so _visibleItems recomputes
       });
     }
+  }
+
+  // --- Helpers for parsing numbers & ratings ---
+  num _asNum(dynamic v) {
+    if (v is num) return v;
+    if (v is String) return num.tryParse(v) ?? 0;
+    return 0;
+  }
+
+  double _ratingOf(Map<String, dynamic> p) {
+    final v = p['rating'] ?? p['avg_rating'] ?? p['avgRating'] ?? 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
   }
 
   List<Map<String, dynamic>> get _visibleItems {
@@ -112,18 +132,19 @@ class _EventProductsScreenState extends State<EventProductsScreen> {
       return name.contains(q) || desc.contains(q);
     }).toList();
 
-    // sort local by price asc/desc
+    // sort local
     filtered.sort((a, b) {
-      final paRaw = a['price'];
-      final pbRaw = b['price'];
-      final pa = paRaw is num ? paRaw : num.tryParse(paRaw?.toString() ?? '0') ?? 0;
-      final pb = pbRaw is num ? pbRaw : num.tryParse(pbRaw?.toString() ?? '0') ?? 0;
-
-      if (_selectedSort == 'Price: Low → High') {
-        return pa.compareTo(pb);
-      } else {
-        return pb.compareTo(pa);
+      switch (_selectedSort) {
+        case 'Price: Low → High':
+          return _asNum(a['price']).compareTo(_asNum(b['price']));
+        case 'Price: High → Low':
+          return _asNum(b['price']).compareTo(_asNum(a['price']));
+        case 'Rating: High → Low':
+          return _ratingOf(b).compareTo(_ratingOf(a));
+        case 'Rating: Low → High':
+          return _ratingOf(a).compareTo(_ratingOf(b));
       }
+      return 0;
     });
 
     return filtered;
@@ -192,9 +213,7 @@ class _EventProductsScreenState extends State<EventProductsScreen> {
                       ),
                       if (_searchCtrl.text.isNotEmpty)
                         GestureDetector(
-                          onTap: () {
-                            _searchCtrl.clear();
-                          },
+                          onTap: () => _searchCtrl.clear(),
                           child: const Icon(Icons.close, size: 18),
                         ),
                     ],
@@ -222,7 +241,7 @@ class _EventProductsScreenState extends State<EventProductsScreen> {
                     ),
                     const SizedBox(width: 12),
 
-                    // SORT DROPDOWN
+                    // SORT DROPDOWN (now includes rating)
                     Expanded(
                       child: _FilterDropdown<String>(
                         label: 'Sort',
@@ -250,19 +269,17 @@ class _EventProductsScreenState extends State<EventProductsScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                ? _ErrorRetry(
-              message: _error!,
-              onRetry: _fetch,
-            )
+                ? _ErrorRetry(message: _error!, onRetry: _fetch)
                 : visibleItems.isEmpty
                 ? const _EmptyState()
                 : GridView.builder(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              gridDelegate:
+              const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 mainAxisSpacing: 16,
                 crossAxisSpacing: 16,
-                childAspectRatio: 0.7,
+                childAspectRatio: 0.62, // taller -> avoids overflow
               ),
               itemCount: visibleItems.length,
               itemBuilder: (context, index) {
@@ -299,7 +316,8 @@ class _FilterDropdown<T> extends StatelessWidget {
     return InputDecorator(
       decoration: InputDecoration(
         labelText: label,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        contentPadding:
+        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -381,7 +399,8 @@ class _ErrorRetry extends StatelessWidget {
   }
 }
 
-// Event Product Card widget
+/* ───────────────────── PRODUCT CARD (with ⭐ rating) ───────────────────── */
+
 class _EventProductCard extends StatelessWidget {
   final Map<String, dynamic> product;
   const _EventProductCard({required this.product});
@@ -419,6 +438,13 @@ class _EventProductCard extends StatelessWidget {
     return const [];
   }
 
+  double _ratingOf(Map<String, dynamic> p) {
+    final v = p['rating'] ?? p['avg_rating'] ?? p['avgRating'] ?? 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -431,6 +457,8 @@ class _EventProductCard extends StatelessWidget {
 
     final hasDiscount = discountPercentNum > 0 && priceNum > 0;
     final discountedPrice = _calcDiscountedPrice(priceNum, discountPercentNum);
+
+    final rating = _ratingOf(product);
 
     final sellerName = (product['seller']?['full_name'] ??
         product['seller_full_name'] ??
@@ -524,9 +552,14 @@ class _EventProductCard extends StatelessWidget {
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
-                maxLines: 2,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+
+              const SizedBox(height: 4),
+
+              // ⭐ Rating row (shows 0–5 with number)
+              _StarRating(rating: rating, size: 13, showNumber: true),
 
               const SizedBox(height: 6),
 
@@ -546,7 +579,8 @@ class _EventProductCard extends StatelessWidget {
                     '฿ ${_fmtBaht(priceNum)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       decoration: TextDecoration.lineThrough,
-                      color: theme.textTheme.bodySmall?.color?.withOpacity(.6),
+                      color: theme.textTheme.bodySmall?.color
+                          ?.withOpacity(.6),
                       fontSize: 11,
                     ),
                   ),
@@ -577,7 +611,8 @@ class _EventProductCard extends StatelessWidget {
                       sellerName,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontSize: 11,
-                        color: theme.textTheme.bodySmall?.color?.withOpacity(.8),
+                        color:
+                        theme.textTheme.bodySmall?.color?.withOpacity(.8),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -605,10 +640,8 @@ class _ChipBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 4,
-      ),
+      padding:
+      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
@@ -621,6 +654,53 @@ class _ChipBadge extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
+    );
+  }
+}
+
+/* ------------------------------ STAR RATING ------------------------------ */
+
+class _StarRating extends StatelessWidget {
+  final double rating;        // 0..5
+  final double size;          // icon size
+  final bool showNumber;      // show numeric score
+  final Color color;          // star color
+
+  const _StarRating({
+    super.key,
+    required this.rating,
+    this.size = 12,
+    this.showNumber = true,
+    this.color = const Color(0xFF7C3AED), // Lucid purple
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final r = rating.clamp(0, 5).toDouble();
+    final stars = <Widget>[];
+    for (int i = 1; i <= 5; i++) {
+      final icon = r >= i
+          ? Icons.star_rounded
+          : (r >= i - 0.5 ? Icons.star_half_rounded : Icons.star_border_rounded);
+      stars.add(Icon(icon, size: size, color: color));
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...stars,
+        if (showNumber) ...[
+          const SizedBox(width: 6),
+          Text(
+            r.toStringAsFixed(1),
+            style: TextStyle(
+              fontSize: size - 1,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

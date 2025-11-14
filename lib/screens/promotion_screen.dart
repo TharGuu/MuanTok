@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
 import 'product_detail_screen.dart';
 
+/* ------------------------------ Lucid tokens ------------------------------ */
+const _kPurple = Color(0xFF7C3AED);
+const _kShadow = Color(0x14000000);
+
+/* ------------------------------- Screen ----------------------------------- */
+
 class PromotionScreen extends StatefulWidget {
   final int eventId;      // which promo/event we're viewing
   final String eventName; // title to show in the app bar
@@ -43,6 +49,8 @@ class _PromotionScreenState extends State<PromotionScreen> {
   static const List<String> _sortOptions = <String>[
     'Price: Low → High',
     'Price: High → Low',
+    'Rating: High → Low',
+    'Rating: Low → High',
   ];
 
   @override
@@ -59,7 +67,7 @@ class _PromotionScreenState extends State<PromotionScreen> {
     super.dispose();
   }
 
-  // 1. fetch all products for THIS promo/event from Supabase
+  // 1) Fetch all products for THIS promo/event from Supabase
   Future<void> _fetch() async {
     setState(() {
       _loading = true;
@@ -71,6 +79,14 @@ class _PromotionScreenState extends State<PromotionScreen> {
       final products = await SupabaseService.listProductsByEvent(
         eventId: widget.eventId,
       );
+
+      // Normalize: compute effective price once so sort is consistent
+      for (final p in products) {
+        final price = _asNum(p['price']);
+        final pct = _asNum(p['discount_percent']);
+        final effective = pct > 0 ? (price * (100 - pct)) / 100 : price;
+        p['effective_price'] = effective;
+      }
 
       setState(() {
         _allItems = products;
@@ -90,7 +106,7 @@ class _PromotionScreenState extends State<PromotionScreen> {
     }
   }
 
-  // 2. apply text search, category filter, price sort
+  // 2) Apply text search, category filter, and sort (price/rating)
   void _applyFiltersLocally() {
     final q = _searchCtrl.text.trim().toLowerCase();
 
@@ -110,18 +126,19 @@ class _PromotionScreenState extends State<PromotionScreen> {
       return name.contains(q) || desc.contains(q);
     }).toList();
 
-    // sort by price
+    // sort
     searched.sort((a, b) {
-      final paRaw = a['price'];
-      final pbRaw = b['price'];
-      final pa = paRaw is num ? paRaw : num.tryParse('$paRaw') ?? 0;
-      final pb = pbRaw is num ? pbRaw : num.tryParse('$pbRaw') ?? 0;
-
-      if (_selectedSort == 'Price: Low → High') {
-        return pa.compareTo(pb);
-      } else {
-        return pb.compareTo(pa);
+      switch (_selectedSort) {
+        case 'Price: Low → High':
+          return _asNum(a['effective_price']).compareTo(_asNum(b['effective_price']));
+        case 'Price: High → Low':
+          return _asNum(b['effective_price']).compareTo(_asNum(a['effective_price']));
+        case 'Rating: High → Low':
+          return _ratingOf(b).compareTo(_ratingOf(a));
+        case 'Rating: Low → High':
+          return _ratingOf(a).compareTo(_ratingOf(b));
       }
+      return 0;
     });
 
     if (mounted) {
@@ -129,6 +146,25 @@ class _PromotionScreenState extends State<PromotionScreen> {
         _filteredItems = searched;
       });
     }
+  }
+
+  // ---------------------------- Small helpers -----------------------------
+  num _asNum(dynamic v) {
+    if (v is num) return v;
+    if (v is String) return num.tryParse(v) ?? 0;
+    return 0;
+  }
+
+  double _ratingOf(Map<String, dynamic> p) {
+    final v = p['rating'] ?? p['avg_rating'] ?? p['avgRating'] ?? 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
+  String _fmtBaht(num value) {
+    final s = value.toStringAsFixed(2);
+    return s.endsWith('00') ? value.toStringAsFixed(0) : s;
   }
 
   @override
@@ -196,9 +232,7 @@ class _PromotionScreenState extends State<PromotionScreen> {
                       ),
                       if (_searchCtrl.text.isNotEmpty)
                         GestureDetector(
-                          onTap: () {
-                            _searchCtrl.clear();
-                          },
+                          onTap: () => _searchCtrl.clear(),
                           child: const Icon(Icons.close, size: 18),
                         ),
                     ],
@@ -217,16 +251,14 @@ class _PromotionScreenState extends State<PromotionScreen> {
                         values: _categories,
                         onChanged: (val) {
                           if (val == null) return;
-                          setState(() {
-                            _selectedCategory = val;
-                          });
+                          setState(() => _selectedCategory = val);
                           _applyFiltersLocally();
                         },
                       ),
                     ),
                     const SizedBox(width: 12),
 
-                    // SORT DROPDOWN
+                    // SORT DROPDOWN (now includes rating)
                     Expanded(
                       child: _FilterDropdown<String>(
                         label: 'Sort',
@@ -234,9 +266,7 @@ class _PromotionScreenState extends State<PromotionScreen> {
                         values: _sortOptions,
                         onChanged: (val) {
                           if (val == null) return;
-                          setState(() {
-                            _selectedSort = val;
-                          });
+                          setState(() => _selectedSort = val);
                           _applyFiltersLocally();
                         },
                       ),
@@ -254,25 +284,16 @@ class _PromotionScreenState extends State<PromotionScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                ? _ErrorRetry(
-              message: _error!,
-              onRetry: _fetch,
-            )
+                ? _ErrorRetry(message: _error!, onRetry: _fetch)
                 : _filteredItems.isEmpty
                 ? const _EmptyState()
                 : GridView.builder(
-              padding: const EdgeInsets.fromLTRB(
-                16,
-                0,
-                16,
-                16,
-              ),
-              gridDelegate:
-              const SliverGridDelegateWithFixedCrossAxisCount(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 mainAxisSpacing: 16,
                 crossAxisSpacing: 16,
-                childAspectRatio: 0.7,
+                childAspectRatio: 0.62, // tall enough; avoids overflow
               ),
               itemCount: _filteredItems.length,
               itemBuilder: (context, index) {
@@ -308,8 +329,7 @@ class _FilterDropdown<T> extends StatelessWidget {
     return InputDecorator(
       decoration: InputDecoration(
         labelText: label,
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -389,45 +409,42 @@ class _ErrorRetry extends StatelessWidget {
   }
 }
 
-/* ───────────────────── PRODUCT CARD FOR EVENT GRID ───────────────────── */
+/* ───────────── PRODUCT CARD FOR EVENT GRID (with ⭐ rating) ───────────── */
 
 class _EventProductCard extends StatelessWidget {
   final Map<String, dynamic> product;
   const _EventProductCard({required this.product});
 
-  // helpers to match shop_screen formatting
-  num _parseNum(dynamic v) {
+  num _asNum(dynamic v) {
     if (v is num) return v;
-    if (v is String) {
-      final d = double.tryParse(v);
-      if (d != null) return d;
-    }
+    if (v is String) return num.tryParse(v) ?? 0;
     return 0;
   }
 
   String _fmtBaht(num value) {
     final s = value.toStringAsFixed(2);
     return s.endsWith('00') ? value.toStringAsFixed(0) : s;
-    // e.g. 2500.00 -> "2500", 199.50 -> "199.5"
   }
 
-  num _calcDiscountedPrice(num price, num discountPct) {
-    if (discountPct <= 0) return price;
-    final discountAmount = price * (discountPct / 100);
-    final discounted = price - discountAmount;
-    return discounted.round(); // nice clean integer baht
+  num _discounted(num price, num pct) {
+    if (pct <= 0) return price;
+    return (price * (100 - pct)) / 100;
   }
 
   List<String> _extractImageUrls(dynamic v) {
     if (v is List) {
-      return v
-          .map((e) => e?.toString() ?? '')
-          .where((s) => s.isNotEmpty)
-          .toList();
+      return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
     } else if (v is String && v.isNotEmpty) {
       return [v];
     }
     return const [];
+  }
+
+  double _ratingOf(Map<String, dynamic> p) {
+    final v = p['rating'] ?? p['avg_rating'] ?? p['avgRating'] ?? 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
   }
 
   @override
@@ -437,22 +454,13 @@ class _EventProductCard extends StatelessWidget {
     final name = (product['name'] ?? '').toString();
     final category = (product['category'] ?? '').toString();
 
-    // base price
-    final priceNum = _parseNum(product['price']);
+    final price = _asNum(product['price']);
+    final pct = _asNum(product['discount_percent']);
+    final hasDiscount = pct > 0 && price > 0;
+    final eff = _discounted(price, pct);
 
-    // discount from SupabaseService.listProductsByEvent()
-    final discountPercentNum = _parseNum(product['discount_percent']);
+    final rating = _ratingOf(product);
 
-    final bool hasDiscount =
-        discountPercentNum > 0 && priceNum > 0;
-
-    // discounted price (if any)
-    final discountedPrice = _calcDiscountedPrice(
-      priceNum,
-      discountPercentNum,
-    );
-
-    // seller display
     final sellerName = (product['seller']?['full_name'] ??
         product['seller_full_name'] ??
         product['full_name'] ??
@@ -460,11 +468,8 @@ class _EventProductCard extends StatelessWidget {
         'Unknown Seller')
         .toString();
 
-    // first product image
     final urls = _extractImageUrls(
-      product['image_urls'] ??
-          product['imageurl'] ??
-          product['image_url'],
+      product['image_urls'] ?? product['imageurl'] ?? product['image_url'],
     );
     final firstImageUrl = urls.isNotEmpty ? urls.first : null;
 
@@ -474,7 +479,6 @@ class _EventProductCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          // 👇 this is the important part (navigate to product detail)
           Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => ProductDetailScreen(
@@ -487,9 +491,8 @@ class _EventProductCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: theme.dividerColor.withOpacity(.4),
-            ),
+            border: Border.all(color: theme.dividerColor.withOpacity(.4)),
+            boxShadow: const [BoxShadow(color: _kShadow, blurRadius: 8, offset: Offset(0, 4))],
           ),
           padding: const EdgeInsets.all(8),
           child: Column(
@@ -502,12 +505,8 @@ class _EventProductCard extends StatelessWidget {
                     Positioned.fill(
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: firstImageUrl != null &&
-                            firstImageUrl.isNotEmpty
-                            ? Image.network(
-                          firstImageUrl,
-                          fit: BoxFit.cover,
-                        )
+                        child: firstImageUrl != null && firstImageUrl.isNotEmpty
+                            ? Image.network(firstImageUrl, fit: BoxFit.cover)
                             : Container(
                           color: Colors.grey.shade300,
                           child: const Center(
@@ -516,7 +515,6 @@ class _EventProductCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // category badge
                     if (category.isNotEmpty)
                       Positioned(
                         top: 6,
@@ -527,14 +525,12 @@ class _EventProductCard extends StatelessWidget {
                           fg: Colors.white,
                         ),
                       ),
-
-                    // discount badge
                     if (hasDiscount)
                       Positioned(
                         top: 6,
                         right: 6,
                         child: _ChipBadge(
-                          text: '-${discountPercentNum.toString()}%',
+                          text: '-${pct.toString()}%',
                           bg: Colors.red,
                           fg: Colors.white,
                         ),
@@ -545,60 +541,61 @@ class _EventProductCard extends StatelessWidget {
 
               const SizedBox(height: 8),
 
-              // name
+              // Name
               Text(
                 name,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-                maxLines: 2,
+                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
 
+              const SizedBox(height: 4),
+
+              // ⭐ Rating row (purple) — NEW
+              _StarRating(rating: rating, size: 13, showNumber: true, color: _kPurple),
+
               const SizedBox(height: 6),
 
-              // price block
+              // Price
               hasDiscount
                   ? Row(
                 children: [
                   Text(
-                    '฿ ${_fmtBaht(discountedPrice)}',
+                    '฿ ${_fmtBaht(eff)}',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                       color: Colors.red,
                     ),
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    '฿ ${_fmtBaht(priceNum)}',
+                    '฿ ${_fmtBaht(price)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       decoration: TextDecoration.lineThrough,
-                      color: theme.textTheme.bodySmall?.color
-                          ?.withOpacity(.6),
+                      color: theme.textTheme.bodySmall?.color?.withOpacity(.6),
                       fontSize: 11,
                     ),
                   ),
                 ],
               )
                   : Text(
-                '฿ ${_fmtBaht(priceNum)}',
+                '฿ ${_fmtBaht(price)}',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                   color: Colors.red,
                 ),
               ),
 
               const SizedBox(height: 6),
 
-              // seller row
+              // Seller
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Icon(
                     Icons.storefront_rounded,
                     size: 14,
-                    color: theme.textTheme.bodySmall?.color
-                        ?.withOpacity(.7),
+                    color: theme.textTheme.bodySmall?.color?.withOpacity(.7),
                   ),
                   const SizedBox(width: 4),
                   Expanded(
@@ -606,8 +603,7 @@ class _EventProductCard extends StatelessWidget {
                       sellerName,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontSize: 11,
-                        color: theme.textTheme.bodySmall?.color
-                            ?.withOpacity(.8),
+                        color: theme.textTheme.bodySmall?.color?.withOpacity(.8),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -622,6 +618,55 @@ class _EventProductCard extends StatelessWidget {
   }
 }
 
+/* ------------------------------ Star rating ------------------------------- */
+
+class _StarRating extends StatelessWidget {
+  final double rating;        // 0..5
+  final double size;          // icon size
+  final bool showNumber;      // show numeric score
+  final Color color;          // star color
+
+  const _StarRating({
+    super.key,
+    required this.rating,
+    this.size = 12,
+    this.showNumber = true,
+    this.color = _kPurple,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final r = rating.clamp(0, 5).toDouble();
+    final stars = <Widget>[];
+    for (int i = 1; i <= 5; i++) {
+      final icon = r >= i
+          ? Icons.star_rounded
+          : (r >= i - 0.5 ? Icons.star_half_rounded : Icons.star_border_rounded);
+      stars.add(Icon(icon, size: size, color: color));
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...stars,
+        if (showNumber) ...[
+          const SizedBox(width: 6),
+          Text(
+            r.toStringAsFixed(1),
+            style: TextStyle(
+              fontSize: size - 1,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/* ------------------------------- Chip badge ------------------------------- */
+
 class _ChipBadge extends StatelessWidget {
   final String text;
   final Color bg;
@@ -635,8 +680,7 @@ class _ChipBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),

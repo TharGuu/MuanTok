@@ -22,7 +22,15 @@ void _openFavourites(BuildContext context) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                        OUT-OF-STOCK VISIBILITY HELPERS                     */
+/*                               LUCID THEME TOKENS                            */
+/* -------------------------------------------------------------------------- */
+
+const kLucidPrimary = Color(0xFF7C3AED);  // core purple
+const kLucidPrimaryLite = Color(0xFFD8BEE5); // your requested icon tint
+const kLucidShadow = Color(0x14000000);
+
+/* -------------------------------------------------------------------------- */
+/*                        OUT-OF-STOCK VISIBILITY HELPERS                      */
 /* -------------------------------------------------------------------------- */
 
 bool _isAdminViewer() => SupabaseService.isAdmin;
@@ -59,7 +67,7 @@ bool _isOutOfStockForViewer(Map<String, dynamic> p) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               CATEGORY MODEL                               */
+/*                               CATEGORY MODEL                                */
 /* -------------------------------------------------------------------------- */
 
 class _Category {
@@ -80,7 +88,7 @@ const _categories = <_Category>[
 ];
 
 /* -------------------------------------------------------------------------- */
-/*                               PRICE HELPERS                                */
+/*                               PRICE HELPERS                                 */
 /* -------------------------------------------------------------------------- */
 
 String _fmtBaht(num value) {
@@ -98,7 +106,7 @@ num _parseNum(dynamic v) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                 SHOP SCREEN                                */
+/*                                 SHOP SCREEN                                 */
 /* -------------------------------------------------------------------------- */
 
 class ShopScreen extends StatefulWidget {
@@ -144,7 +152,7 @@ class _ShopScreenState extends State<ShopScreen> {
                 // buy/sell pill
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.3),
+                    color: Colors.black.withOpacity(0.30),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
@@ -171,7 +179,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openSearch(context),
                         child: const Icon(
                           Icons.search,
-                          color: Color(0xFFD8BEE5),
+                          color: kLucidPrimaryLite,
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -185,7 +193,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openFavourites(context),
                         child: const Icon(
                           Icons.favorite_border_rounded,
-                          color: Color(0xFFD8BEE5),
+                          color: kLucidPrimaryLite,
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -199,7 +207,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         tooltip: 'My Cart',
                         icon: const Icon(
                           Icons.shopping_cart_outlined,
-                          color: Color(0xFFD8BEE5),
+                          color: kLucidPrimaryLite,
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -246,8 +254,10 @@ class _ShopScreenState extends State<ShopScreen> {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                BUY HOME VIEW                               */
+/*                                BUY HOME VIEW                                */
 /* -------------------------------------------------------------------------- */
+
+enum _RecSort { none, ratingHighLow, ratingLowHigh }
 
 class _BuyHome extends StatefulWidget {
   const _BuyHome();
@@ -263,6 +273,9 @@ class _BuyHomeState extends State<_BuyHome> {
   RealtimeChannel? _channel;
   StreamSubscription<void>? _debounce;
 
+  // NEW: local sort for Recommended
+  _RecSort _recSort = _RecSort.none;
+
   @override
   void initState() {
     super.initState();
@@ -275,6 +288,27 @@ class _BuyHomeState extends State<_BuyHome> {
     _channel?.unsubscribe();
     _debounce?.cancel();
     super.dispose();
+  }
+
+  num _ratingOf(Map<String, dynamic> p) {
+    // prefer 'rating' then fallback to 'avg_rating' then 0
+    final v = p['rating'] ?? p['avg_rating'] ?? 0;
+    if (v is num) return v;
+    if (v is String) return num.tryParse(v) ?? 0;
+    return 0;
+  }
+
+  void _applyRecSort() {
+    if (_recSort == _RecSort.none) return;
+    _recommended.sort((a, b) {
+      final ra = _ratingOf(a);
+      final rb = _ratingOf(b);
+      if (_recSort == _RecSort.ratingHighLow) {
+        return rb.compareTo(ra); // high → low
+      } else {
+        return ra.compareTo(rb); // low → high
+      }
+    });
   }
 
   Future<void> _fetchRecommended() async {
@@ -291,7 +325,11 @@ class _BuyHomeState extends State<_BuyHome> {
         ascending: false,
       );
       if (!mounted) return;
-      setState(() => _recommended = _visibleToViewer(list)); // filter here
+      final visible = _visibleToViewer(list);
+      setState(() {
+        _recommended = visible;
+        _applyRecSort(); // apply current rating sort locally
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -366,6 +404,32 @@ class _BuyHomeState extends State<_BuyHome> {
       return 'assets/banners/christmas_sale.png';
     }
     return 'assets/banners/default_event.png';
+  }
+
+  PopupMenuButton<_RecSort> _recSortMenu() {
+    return PopupMenuButton<_RecSort>(
+      tooltip: 'Sort Recommended',
+      initialValue: _recSort,
+      onSelected: (value) {
+        setState(() {
+          _recSort = value;
+          _applyRecSort();
+        });
+      },
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: _RecSort.none, child: Text('Default')),
+        PopupMenuItem(value: _RecSort.ratingHighLow, child: Text('Rating: High → Low')),
+        PopupMenuItem(value: _RecSort.ratingLowHigh, child: Text('Rating: Low → High')),
+      ],
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.sort, size: 18),
+          SizedBox(width: 6),
+          Text('Sort'),
+        ],
+      ),
+    );
   }
 
   @override
@@ -524,7 +588,7 @@ class _BuyHomeState extends State<_BuyHome> {
 
           const SizedBox(height: 16),
 
-          // Recommended header
+          // Recommended header + rating sort + View all
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -537,6 +601,8 @@ class _BuyHomeState extends State<_BuyHome> {
                       ?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const Spacer(),
+                _recSortMenu(),
+                const SizedBox(width: 6),
                 TextButton(
                   onPressed: _openViewAll,
                   child: const Text('View all'),
@@ -565,7 +631,8 @@ class _BuyHomeState extends State<_BuyHome> {
                 child: Text('No products yet.'),
               )
             else
-              _ProductGrid(products: _recommended),
+              const SizedBox.shrink(),
+          if (_recommended.isNotEmpty) _ProductGrid(products: _recommended),
         ],
       ),
     );
@@ -718,7 +785,7 @@ class _CategoryCard extends StatelessWidget {
           boxShadow: [
             if (selected)
               BoxShadow(
-                color: Colors.black.withOpacity(0.08),
+                color: kLucidShadow,
                 blurRadius: 10,
                 offset: const Offset(0, 6),
               ),
@@ -773,7 +840,7 @@ class _ProductGrid extends StatelessWidget {
         crossAxisCount: 2,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 0.70,
+        childAspectRatio: 0.62, // taller tiles → avoids bottom overflow
       ),
       itemBuilder: (_, i) => _ProductCard(data: products[i]),
     );
@@ -786,14 +853,18 @@ class _ProductCard extends StatelessWidget {
 
   List<String> _extractImageUrls(dynamic v) {
     if (v is List) {
-      return v
-          .map((e) => e?.toString() ?? '')
-          .where((s) => s.isNotEmpty)
-          .toList();
+      return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
     } else if (v is String) {
       return [v];
     }
     return const [];
+  }
+
+  double _extractRating(Map<String, dynamic> p) {
+    final v = p['rating'] ?? p['avg_rating'] ?? p['avgRating'] ?? 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
   }
 
   @override
@@ -815,18 +886,14 @@ class _ProductCard extends StatelessWidget {
     final num discounted =
     hasDiscount ? (priceRaw * (100 - discountPercent)) / 100 : priceRaw;
 
+    final rating = _extractRating(data);
+
     final sellerId = (data['seller_id'] ?? data['sellerId'] ?? '').toString();
 
     final Map<String, dynamic>? sellerMap =
-        (data['seller'] is Map
-            ? data['seller'] as Map<String, dynamic>
-            : null) ??
-            (data['users'] is Map
-                ? data['users'] as Map<String, dynamic>
-                : null) ??
-            (data['profiles'] is Map
-                ? data['profiles'] as Map<String, dynamic>
-                : null);
+        (data['seller'] is Map ? data['seller'] as Map<String, dynamic> : null) ??
+            (data['users'] is Map ? data['users'] as Map<String, dynamic> : null) ??
+            (data['profiles'] is Map ? data['profiles'] as Map<String, dynamic> : null);
 
     final sellerNameFromRow = (sellerMap?['full_name'] ??
         data['seller_full_name'] ??
@@ -835,8 +902,7 @@ class _ProductCard extends StatelessWidget {
         ?.toString();
 
     final stock = _asInt(data['stock']);
-    final showOutBadge =
-        stock <= 0 && !_isOutOfStockForViewer(data); // admin/owner badge
+    final showOutBadge = stock <= 0 && !_isOutOfStockForViewer(data); // admin/owner badge
 
     return Material(
       color: Colors.white,
@@ -894,8 +960,7 @@ class _ProductCard extends StatelessWidget {
                       left: 8,
                       top: 8 + (category.isNotEmpty ? 28 : 0),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.70),
                           borderRadius: BorderRadius.circular(8),
@@ -920,6 +985,7 @@ class _ProductCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // name
                   Text(
                     name,
                     maxLines: 1,
@@ -930,6 +996,18 @@ class _ProductCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
+
+                  // ⭐ Rating row (reads `rating` or falls back to `avg_rating`)
+                  _StarRating(
+                    rating: rating,
+                    size: 13,
+                    color: kLucidPrimary,
+                    showNumber: true,
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  // price / discount
                   hasDiscount
                       ? Row(
                     mainAxisSize: MainAxisSize.min,
@@ -971,7 +1049,10 @@ class _ProductCard extends StatelessWidget {
                       height: 1.0,
                     ),
                   ),
+
                   const SizedBox(height: 6),
+
+                  // seller row
                   Row(
                     children: [
                       Icon(
@@ -981,8 +1062,7 @@ class _ProductCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: sellerNameFromRow != null &&
-                            sellerNameFromRow.isNotEmpty
+                        child: sellerNameFromRow != null && sellerNameFromRow.isNotEmpty
                             ? Text(
                           sellerNameFromRow,
                           maxLines: 1,
@@ -1021,8 +1101,7 @@ class CategoryProductsScreen extends StatefulWidget {
   });
 
   @override
-  State<CategoryProductsScreen> createState() =>
-      _CategoryProductsScreenState();
+  State<CategoryProductsScreen> createState() => _CategoryProductsScreenState();
 }
 
 class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
@@ -1110,7 +1189,7 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
 
 /* ------------------------------ VIEW ALL SCREEN --------------------------- */
 
-enum _AllSort { newest, priceLowHigh, priceHighLow, ratingHighLow }
+enum _AllSort { newest, priceLowHigh, priceHighLow, ratingHighLow, ratingLowHigh }
 
 class AllProductsScreen extends StatefulWidget {
   const AllProductsScreen({super.key});
@@ -1155,6 +1234,10 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
       case _AllSort.ratingHighLow:
         orderBy = 'rating';
         ascending = false;
+        break;
+      case _AllSort.ratingLowHigh:
+        orderBy = 'rating';
+        ascending = true;
         break;
     }
 
@@ -1217,12 +1300,12 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
             ? const Center(child: CircularProgressIndicator())
             : _error != null
             ? ListView(
-          children: [
-            const SizedBox(height: 24),
+          children: const [
+            SizedBox(height: 24),
             Center(
               child: Text(
-                'Error: $_error',
-                style: const TextStyle(color: Colors.red),
+                'Error loading products',
+                style: TextStyle(color: Colors.red),
               ),
             ),
           ],
@@ -1243,6 +1326,7 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
                   _sortChip(_AllSort.priceLowHigh, 'Price: Low → High'),
                   _sortChip(_AllSort.priceHighLow, 'Price: High → Low'),
                   _sortChip(_AllSort.ratingHighLow, 'Rating: High → Low'),
+                  _sortChip(_AllSort.ratingLowHigh, 'Rating: Low → High'),
                 ],
               ),
             ),
@@ -1263,7 +1347,7 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                         SELL FORM (UPDATED VERSION)                        */
+/*                         SELL FORM (UPDATED VERSION)                         */
 /* -------------------------------------------------------------------------- */
 
 class ProductInput {
@@ -1823,8 +1907,7 @@ class FullscreenGallery extends StatefulWidget {
 }
 
 class _FullscreenGalleryState extends State<FullscreenGallery> {
-  late final PageController _ctrl =
-  PageController(initialPage: widget.initialIndex);
+  late final PageController _ctrl = PageController(initialPage: widget.initialIndex);
 
   @override
   Widget build(BuildContext context) {
@@ -1910,6 +1993,49 @@ class _DiscountBadge extends StatelessWidget {
           height: 1.0,
         ),
       ),
+    );
+  }
+}
+
+/* ------------------------------ STAR RATING -------------------------------- */
+
+class _StarRating extends StatelessWidget {
+  final double rating;        // 0..5
+  final double size;          // icon size
+  final bool showNumber;      // show numeric score
+  final Color color;          // star color (Lucid purple)
+
+  const _StarRating({
+    super.key,
+    required this.rating,
+    this.size = 12,
+    this.showNumber = true,
+    this.color = kLucidPrimary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final r = rating.clamp(0, 5).toDouble();
+    final stars = <Widget>[];
+    for (int i = 1; i <= 5; i++) {
+      final icon = r >= i
+          ? Icons.star_rounded
+          : (r >= i - 0.5 ? Icons.star_half_rounded : Icons.star_border_rounded);
+      stars.add(Icon(icon, size: size, color: color));
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...stars,
+        if (showNumber) ...[
+          const SizedBox(width: 6),
+          Text(
+            r.toStringAsFixed(1),
+            style: TextStyle(fontSize: size - 1, fontWeight: FontWeight.w700, height: 1),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -2106,8 +2232,7 @@ class _CouponsSectionState extends State<CouponsSection> {
                           padding: const EdgeInsets.all(6),
                           decoration: const BoxDecoration(
                             shape: BoxShape.circle,
-                            gradient:
-                            LinearGradient(colors: [_lcPrimary, _lcPrimary2]),
+                            gradient: LinearGradient(colors: [_lcPrimary, _lcPrimary2]),
                           ),
                           child: const Icon(Icons.local_offer_rounded,
                               color: Colors.white, size: 16),
@@ -2355,7 +2480,8 @@ class _SearchList extends StatelessWidget {
           is_event,
           discount_percent,
           seller_id,
-          seller:users!products_seller_id_fkey(full_name)
+          seller:users!products_seller_id_fkey(full_name),
+          rating
         ''')
         .order('id', ascending: false)
         .limit(120);
@@ -2390,8 +2516,7 @@ class _SearchList extends StatelessWidget {
     }
 
     // 5. Pull best discount for each product from product_events
-    final productIds =
-    filtered.map((p) => p['id']).whereType<int>().toList();
+    final productIds = filtered.map((p) => p['id']).whereType<int>().toList();
 
     final bestMap =
     await SupabaseService.fetchBestDiscountMapForProducts(productIds);
