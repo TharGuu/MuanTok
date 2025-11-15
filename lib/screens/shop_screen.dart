@@ -196,7 +196,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openSearch(context),
                         child: const Icon(
                           Icons.search,
-                          color: kLucidPrimary,
+                          color: kLucidPrimaryLite, // 💜 #D8BEE5
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -210,7 +210,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openFavourites(context),
                         child: const Icon(
                           Icons.favorite_border_rounded,
-                          color: kLucidPrimary,
+                          color: kLucidPrimaryLite, // 💜 #D8BEE5
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -224,7 +224,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         tooltip: 'My Cart',
                         icon: const Icon(
                           Icons.shopping_cart_outlined,
-                          color: kLucidPrimary,
+                          color: kLucidPrimaryLite, // 💜 #D8BEE5
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -318,6 +318,24 @@ class _BuyHomeState extends State<_BuyHome> {
     return 0;
   }
 
+  Future<void> _enrichRatings(List<Map<String, dynamic>> items) async {
+    final futures = <Future<void>>[];
+    for (final p in items) {
+      final pid = p['id'];
+      if (pid is! int) continue;
+      futures.add(() async {
+        try {
+          final agg = await SupabaseService.fetchRatingAggregate(pid);
+          p['rating'] = agg['avg'] ?? p['rating'] ?? 0;
+          p['rating_count'] = agg['count'] ?? p['rating_count'] ?? 0;
+        } catch (_) {
+          // ignore per-item errors
+        }
+      }());
+    }
+    await Future.wait(futures);
+  }
+
   void _applyRecSort() {
     if (_recSort == _RecSort.none) return;
     _recommended.sort((a, b) {
@@ -346,6 +364,11 @@ class _BuyHomeState extends State<_BuyHome> {
       );
       if (!mounted) return;
       final visible = _visibleToViewer(list);
+
+      // hydrate ratings from product_ratings
+      await _enrichRatings(visible);
+      if (!mounted) return;
+
       setState(() {
         _recommended = visible;
         _applyRecSort(); // apply current rating sort locally
@@ -953,8 +976,7 @@ class _ProductCard extends StatelessWidget {
         ? data['discount_percent'] as int
         : int.tryParse('${data['discount_percent'] ?? 0}') ?? 0;
 
-    final bool hasDiscount =
-        isEvent && discountPercent > 0 && priceRaw > 0;
+    final bool hasDiscount = isEvent && discountPercent > 0 && priceRaw > 0;
     final num discounted =
     hasDiscount ? (priceRaw * (100 - discountPercent)) / 100 : priceRaw;
 
@@ -1212,6 +1234,22 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
     _fetch();
   }
 
+  Future<void> _enrichRatings(List<Map<String, dynamic>> items) async {
+    final futures = <Future<void>>[];
+    for (final p in items) {
+      final pid = p['id'];
+      if (pid is! int) continue;
+      futures.add(() async {
+        try {
+          final agg = await SupabaseService.fetchRatingAggregate(pid);
+          p['rating'] = agg['avg'] ?? p['rating'] ?? 0;
+          p['rating_count'] = agg['count'] ?? p['rating_count'] ?? 0;
+        } catch (_) {}
+      }());
+    }
+    await Future.wait(futures);
+  }
+
   Future<void> _fetch() async {
     setState(() {
       _loading = true;
@@ -1235,7 +1273,10 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
 
       final visible = _visibleToViewer(cleaned);
 
+      // hydrate ratings
+      await _enrichRatings(visible);
       if (!mounted) return;
+
       setState(() => _items = visible);
     } catch (e) {
       if (!mounted) return;
@@ -1339,6 +1380,22 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
     }
   }
 
+  Future<void> _enrichRatings(List<Map<String, dynamic>> items) async {
+    final futures = <Future<void>>[];
+    for (final p in items) {
+      final pid = p['id'];
+      if (pid is! int) continue;
+      futures.add(() async {
+        try {
+          final agg = await SupabaseService.fetchRatingAggregate(pid);
+          p['rating'] = agg['avg'] ?? p['rating'] ?? 0;
+          p['rating_count'] = agg['count'] ?? p['rating_count'] ?? 0;
+        } catch (_) {}
+      }());
+    }
+    await Future.wait(futures);
+  }
+
   Future<void> _fetch() async {
     setState(() {
       _loading = true;
@@ -1379,7 +1436,13 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
         ascending: ascending,
       );
       if (!mounted) return;
-      setState(() => _items = _visibleToViewer(list)); // keep your visibility rule
+      final visible = _visibleToViewer(list);
+
+      // hydrate ratings for All Products
+      await _enrichRatings(visible);
+      if (!mounted) return;
+
+      setState(() => _items = visible);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -2835,6 +2898,22 @@ class _SearchListState extends State<_SearchList> {
     return list;
   }
 
+  Future<void> _enrichRatings(List<Map<String, dynamic>> items) async {
+    final futures = <Future<void>>[];
+    for (final p in items) {
+      final pid = p['id'];
+      if (pid is! int) continue;
+      futures.add(() async {
+        try {
+          final agg = await SupabaseService.fetchRatingAggregate(pid);
+          p['rating'] = agg['avg'] ?? p['rating'] ?? 0;
+          p['rating_count'] = agg['count'] ?? p['rating_count'] ?? 0;
+        } catch (_) {}
+      }());
+    }
+    await Future.wait(futures);
+  }
+
   Future<List<Map<String, dynamic>>> _fetch() async {
     // 1. Get recent products from Supabase
     final rows = await widget.sb
@@ -2904,6 +2983,10 @@ class _SearchListState extends State<_SearchList> {
 
     // 6. Apply visibility rule so buyers don't see stock=0 in search either
     final visible = _visibleToViewer(filtered);
+
+    // 7. Hydrate ratings as well
+    await _enrichRatings(visible);
+
     return visible;
   }
 
