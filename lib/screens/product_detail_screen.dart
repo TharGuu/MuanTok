@@ -1,6 +1,7 @@
 // lib/screens/product_detail_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'my_products_screen.dart';
 import 'promotion_screen.dart';
 import 'event_products_screen.dart';
@@ -52,9 +53,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
   static const int _commentPreviewLimit = 3;
 
-  // brand colors
+  // Lucid-ish brand colors
+  static const Color kPurpleDark = Color(0xFF7C3AED); // core purple
   static const Color kPurple = Color(0xFFD8BEE5); // light purple accent
-  static const Color kPurpleDark = Color(0xFF9C6BCF); // darker fill purple
   static const Color kBorderGrey = Color(0xFFDDDDDD); // subtle border
   static const Color kTextDark = Colors.black;
   static final Color kTextLight = Colors.grey.shade600;
@@ -81,11 +82,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   void _initLoadAfterBuild() {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _resolveRoleFlags();
-      await _fetchAll();            // product, events, comments
+      await _fetchAll(); // product, events, comments
       await _refreshCommentsOnly(); // force sync preview comments
-      await _fetchRelated();        // pull related items
+      await _fetchRelated(); // pull related items
       await _fetchActiveEventBanner(); // pull active banner
-      await _checkFav();            //
+      await _checkFav();
       await _loadFavouriteStatus();
 
       // start realtime product rating subscription (after initial fetch)
@@ -279,13 +280,16 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   // NEW: get banner for active event of this product (simple mapping demo)
   Future<void> _fetchActiveEventBanner() async {
     try {
-      final eventName =
-      _events.isNotEmpty ? (_events.first['event_name'] ?? _events.first['name']) : null;
+      final eventName = _events.isNotEmpty
+          ? (_events.first['event_name'] ?? _events.first['name'])
+          : null;
 
       if (eventName == 'Christmas Sale') {
-        setState(() => _activeEventBannerUrl = 'assets/banners/christmas_sale.png');
+        setState(() =>
+        _activeEventBannerUrl = 'assets/banners/christmas_sale.png');
       } else if (eventName == 'Promotion') {
-        setState(() => _activeEventBannerUrl = 'assets/banners/promotion.png');
+        setState(() =>
+        _activeEventBannerUrl = 'assets/banners/promotion.png');
       } else {
         setState(() => _activeEventBannerUrl = null);
       }
@@ -297,7 +301,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   // favourites
   Future<void> _checkFav() async {
     try {
-      final fav = await SupabaseService.isFavourited(productId: widget.productId);
+      final fav =
+      await SupabaseService.isFavourited(productId: widget.productId);
       if (mounted) setState(() => _isFavourite = fav);
     } catch (_) {}
   }
@@ -346,8 +351,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             ? 'Do you want to add this product to your favourites?'
             : 'Do you want to remove this product from your favourites?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Yes')),
         ],
       ),
     );
@@ -355,11 +364,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     setState(() => _togglingFav = true);
     try {
-      final now = await SupabaseService.toggleFavourite(productId: widget.productId);
+      final now =
+      await SupabaseService.toggleFavourite(productId: widget.productId);
       if (!mounted) return;
       setState(() => _isFavourite = now);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(now ? 'Added to favourites' : 'Removed from favourites')),
+        SnackBar(
+            content:
+            Text(now ? 'Added to favourites' : 'Removed from favourites')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -391,7 +403,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       );
     } on StateError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -462,8 +475,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     _ratingChannel?.unsubscribe();
 
-    // If your supabase_flutter supports `filter`, you can pass it.
-    // To be 100% compatible, we also guard in the callback.
     _ratingChannel = sb
         .channel('product_rating_${widget.productId}')
         .onPostgresChanges(
@@ -496,8 +507,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           };
         });
       },
-    )
-        .subscribe();
+    ).subscribe();
   }
 
   /* -------------------------------------------------------------------------- */
@@ -542,7 +552,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   fillColor: kSubtleBg,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: kBorderGrey),
+                    borderSide: const BorderSide(color: kBorderGrey),
                   ),
                 ),
               ),
@@ -553,7 +563,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     child: OutlinedButton(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: kTextDark,
-                        side: BorderSide(color: kBorderGrey),
+                        side: const BorderSide(color: kBorderGrey),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -693,7 +703,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
             'Things you might be interested in',
-            style: TextStyle(
+            style: const TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 15,
               color: kTextDark,
@@ -712,7 +722,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               final data = _related[i];
               return _RelatedProductCard(
                 data: data,
-                purple: kPurple,
+                purple: kPurpleDark,
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
@@ -777,8 +787,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Widget build(BuildContext context) {
     final p = _product;
 
-    final loadingOverlay =
-    _loading ? const LinearProgressIndicator(minHeight: 2) : const SizedBox.shrink();
+    final loadingOverlay = _loading
+        ? const LinearProgressIndicator(minHeight: 2)
+        : const SizedBox.shrink();
 
     // If product failed to load
     if (p == null && _error != null) {
@@ -792,15 +803,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             IconButton(
               onPressed: _togglingFav ? null : _toggleFavWithConfirm,
               icon: Icon(
-                _isFavourite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                color: _isFavourite ? Colors.red : kPurple,
+                _isFavourite
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: _isFavourite ? Colors.red : kPurpleDark,
               ),
             ),
             IconButton(
               onPressed: () {},
-              icon: Icon(
+              icon: const Icon(
                 Icons.shopping_cart_outlined,
-                color: kPurple,
+                color: kPurpleDark,
               ),
             ),
           ],
@@ -819,7 +832,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     // When viewers (not seller/admin) see out-of-stock -> show minimal screen
     if (p != null && _viewerIsBlockedByStock()) {
       final name = (p['name'] ?? 'Product').toString();
-      final images = _imgList(p['image_urls'] ?? p['imageurl'] ?? p['image_url']);
+      final images =
+      _imgList(p['image_urls'] ?? p['imageurl'] ?? p['image_url']);
       final img = images.isNotEmpty ? images.first : null;
 
       return Scaffold(
@@ -841,15 +855,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           actions: [
             IconButton(
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => FavouriteScreen()),
+                MaterialPageRoute(builder: (_) => const FavouriteScreen()),
               ),
-              icon: const Icon(Icons.favorite_border_rounded, color: kPurple),
+              icon: const Icon(Icons.favorite_border_rounded,
+                  color: kPurpleDark),
             ),
             IconButton(
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const CartScreen()),
               ),
-              icon: const Icon(Icons.shopping_cart_outlined, color: kPurple),
+              icon: const Icon(Icons.shopping_cart_outlined,
+                  color: kPurpleDark),
             ),
           ],
         ),
@@ -887,20 +903,26 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.inventory_2_rounded, color: Colors.grey.shade700),
+                        Icon(Icons.inventory_2_rounded,
+                            color: Colors.grey.shade700),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
                             'This item is currently out of stock and hidden from buyers.',
-                            style: TextStyle(color: kTextDark, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                              color: kTextDark,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text('If you think this is a mistake, please check back later.',
-                      style: TextStyle(color: kTextLight)),
+                  Text(
+                    'If you think this is a mistake, please check back later.',
+                    style: TextStyle(color: kTextLight),
+                  ),
                 ],
               ),
             ),
@@ -918,12 +940,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ? stockRaw
         : int.tryParse(stockRaw?.toString() ?? '0') ?? 0;
 
-    final dynamic _priceField = p?['price'];
-    final num rawPrice = _priceField is num
-        ? _priceField
-        : (_priceField is String ? (num.tryParse(_priceField) ?? 0) : 0);
+    final dynamic priceField = p?['price'];
+    final num rawPrice = priceField is num
+        ? priceField
+        : (priceField is String ? (num.tryParse(priceField) ?? 0) : 0);
 
-    final discountPct = int.tryParse('${p?['discount_percent'] ?? 0}') ?? 0;
+    final discountPct =
+        int.tryParse('${p?['discount_percent'] ?? 0}') ?? 0;
     final hasDiscount = discountPct > 0;
     final discountedPrice =
     hasDiscount ? rawPrice * (100 - discountPct) / 100 : rawPrice;
@@ -961,12 +984,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           IconButton(
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => FavouriteScreen()),
+                MaterialPageRoute(builder: (_) => const FavouriteScreen()),
               );
             },
             icon: const Icon(
               Icons.favorite_border_rounded,
-              color: kPurple,
+              color: kPurpleDark,
             ),
           ),
           IconButton(
@@ -977,7 +1000,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             },
             icon: const Icon(
               Icons.shopping_cart_outlined,
-              color: kPurple,
+              color: kPurpleDark,
             ),
           ),
         ],
@@ -1035,14 +1058,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     decoration: BoxDecoration(
                       color: kCardBg,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: kBorderGrey),
+                      border: const Border.fromBorderSide(
+                        BorderSide(color: kBorderGrey),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // NAME
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                          padding:
+                          const EdgeInsets.fromLTRB(16, 16, 16, 0),
                           child: Text(
                             name,
                             style: const TextStyle(
@@ -1056,12 +1082,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                         const SizedBox(height: 8),
 
-                        // CATEGORY (moved ABOVE price)
+                        // CATEGORY
                         if (category.isNotEmpty)
                           Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                            padding: const EdgeInsets.fromLTRB(
+                                16, 0, 16, 0),
                             child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
+                              crossAxisAlignment:
+                              CrossAxisAlignment.center,
                               children: [
                                 const Icon(
                                   Icons.category_rounded,
@@ -1087,12 +1115,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                         const SizedBox(height: 8),
 
-                        // PRICE / DISCOUNT (now after category)
+                        // PRICE / DISCOUNT
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16),
                           child: hasDiscount
                               ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
+                            crossAxisAlignment:
+                            CrossAxisAlignment.center,
                             children: [
                               Text(
                                 '฿ ${_fmt(discountedPrice)}',
@@ -1107,7 +1137,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 '฿ ${_fmt(rawPrice)}',
                                 style: TextStyle(
                                   color: Colors.grey.shade600,
-                                  decoration: TextDecoration.lineThrough,
+                                  decoration: TextDecoration
+                                      .lineThrough,
                                   decorationThickness: 2,
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
@@ -1115,13 +1146,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                               const SizedBox(width: 8),
                               Container(
-                                padding: const EdgeInsets.symmetric(
+                                padding:
+                                const EdgeInsets.symmetric(
                                   horizontal: 6,
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
                                   color: Colors.red.shade600,
-                                  borderRadius: BorderRadius.circular(6),
+                                  borderRadius:
+                                  BorderRadius.circular(6),
                                 ),
                                 child: Text(
                                   '-$discountPct%',
@@ -1148,8 +1181,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                         // RATING + STOCK
                         Padding(
-                          padding:
-                          const EdgeInsets.symmetric(horizontal: 16),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16),
                           child: Row(
                             children: [
                               _buildStars(ratingVal, size: 16),
@@ -1184,11 +1217,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         ),
 
                         const SizedBox(height: 16),
-                        Divider(height: 1, color: kBorderGrey),
+                        const Divider(height: 1, color: kBorderGrey),
 
                         // SELLER
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          padding: const EdgeInsets.fromLTRB(
+                              16, 12, 16, 0),
                           child: Row(
                             children: [
                               const Icon(
@@ -1212,8 +1246,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                               TextButton(
                                 onPressed: _openSellerStore,
-                                style: TextButton.styleFrom(foregroundColor: kPurple),
-                                child: const Text('View shop', style: TextStyle(fontWeight: FontWeight.w600)),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: kPurpleDark,
+                                ),
+                                child: const Text(
+                                  'View shop',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -1233,19 +1274,27 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         final chosen = _bestDiscountEvent();
                         if (chosen == null) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('No event found for this product.')),
+                            const SnackBar(
+                                content: Text(
+                                    'No event found for this product.')),
                           );
                           return;
                         }
 
-                        final int? eventId = (chosen['id'] ?? chosen['event_id']) is int
-                            ? (chosen['id'] ?? chosen['event_id']) as int
-                            : int.tryParse('${chosen['id'] ?? chosen['event_id'] ?? ''}');
-                        final String eventName = (chosen['event_name'] ?? 'Event').toString();
+                        final int? eventId =
+                        (chosen['id'] ?? chosen['event_id']) is int
+                            ? (chosen['id'] ??
+                            chosen['event_id']) as int
+                            : int.tryParse(
+                            '${chosen['id'] ?? chosen['event_id'] ?? ''}');
+                        final String eventName =
+                        (chosen['event_name'] ?? 'Event')
+                            .toString();
 
                         if (eventId == null) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Invalid event id.')),
+                            const SnackBar(
+                                content: Text('Invalid event id.')),
                           );
                           return;
                         }
@@ -1253,16 +1302,23 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => PromotionScreen(eventId: eventId, eventName: eventName),
+                            builder: (_) => PromotionScreen(
+                              eventId: eventId,
+                              eventName: eventName,
+                            ),
                           ),
                         );
                       },
                       child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 16),
                         decoration: BoxDecoration(
                           color: kCardBg,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: kBorderGrey),
+                          border:
+                          const Border.fromBorderSide(
+                            BorderSide(color: kBorderGrey),
+                          ),
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: AspectRatio(
@@ -1275,7 +1331,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 color: Colors.grey.shade200,
                                 alignment: Alignment.center,
                                 child: Icon(
-                                  Icons.image_not_supported_outlined,
+                                  Icons
+                                      .image_not_supported_outlined,
                                   color: Colors.grey.shade500,
                                   size: 36,
                                 ),
@@ -1289,11 +1346,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   /* ------------------- DESCRIPTION CARD ------------------- */
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16),
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                    padding: const EdgeInsets.fromLTRB(
+                        16, 16, 16, 16),
                     decoration: BoxDecoration(
                       color: kCardBg,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: kBorderGrey),
+                      border: const Border.fromBorderSide(
+                        BorderSide(color: kBorderGrey),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1324,14 +1384,18 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   /* --------------------- COMMENTS PREVIEW CARD -------------------- */
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16),
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                    padding: const EdgeInsets.fromLTRB(
+                        16, 16, 16, 16),
                     decoration: BoxDecoration(
                       color: kCardBg,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: kBorderGrey),
+                      border: const Border.fromBorderSide(
+                        BorderSide(color: kBorderGrey),
+                      ),
                     ),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                      CrossAxisAlignment.start,
                       children: [
                         // header row: "Comments" + view all
                         Row(
@@ -1350,9 +1414,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               onPressed: _openAllCommentsSheet,
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: kTextDark,
-                                side: const BorderSide(color: kBorderGrey),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                side: const BorderSide(
+                                    color: kBorderGrey),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                  BorderRadius.circular(10),
+                                ),
                               ),
                               child: const Text(
                                 'View all',
@@ -1393,18 +1463,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                             children: _comments.map((c) {
                               final cmtId = c['id'] as int?;
                               final authorName =
-                              (c['author_name'] ?? 'User').toString();
-                              final content = (c['content'] ?? '').toString();
+                              (c['author_name'] ?? 'User')
+                                  .toString();
+                              final content =
+                              (c['content'] ?? '').toString();
                               final createdAt =
                               (c['created_at'] ?? '').toString();
-                              final mine = c['is_mine'] == true;
+                              final mine =
+                                  c['is_mine'] == true;
 
                               return _CommentTile(
                                 authorName: authorName,
                                 content: content,
                                 createdAt: createdAt,
                                 canEdit: mine,
-                                purple: kPurple,
+                                purple: kPurpleDark,
                                 borderGrey: kBorderGrey,
                                 subtleBg: kSubtleBg,
                                 textDark: kTextDark,
@@ -1453,7 +1526,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       // Accept common keys for id/percent/name
       final int? id = (ev['id'] ?? ev['event_id']) is int
           ? (ev['id'] ?? ev['event_id']) as int
-          : int.tryParse('${ev['id'] ?? ev['event_id'] ?? ''}');
+          : int.tryParse(
+          '${ev['id'] ?? ev['event_id'] ?? ''}');
 
       final int pct = (ev['discount_percent'] is num)
           ? (ev['discount_percent'] as num).toInt()
@@ -1472,24 +1546,33 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Widget _hiddenBannerForAdminsAndSeller() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding:
+      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: kPurple.withOpacity(0.25),
-        border: Border(bottom: BorderSide(color: kBorderGrey)),
+        border: const Border(
+          bottom: BorderSide(color: kBorderGrey),
+        ),
       ),
       child: Row(
         children: [
-          const Icon(Icons.visibility_off_rounded, color: kPurpleDark),
+          const Icon(Icons.visibility_off_rounded,
+              color: kPurpleDark),
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
               'Hidden from buyers (out of stock).',
-              style: TextStyle(fontWeight: FontWeight.w700, color: kTextDark),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: kTextDark,
+              ),
             ),
           ),
           TextButton(
             onPressed: _openSellerStore,
-            style: TextButton.styleFrom(foregroundColor: kPurpleDark),
+            style: TextButton.styleFrom(
+              foregroundColor: kPurpleDark,
+            ),
             child: const Text('Manage stock'),
           ),
         ],
@@ -1504,23 +1587,32 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
         color: kCardBg,
-        border: Border(top: BorderSide(color: kBorderGrey, width: 1)),
+        border: const Border(
+          top: BorderSide(color: kBorderGrey, width: 1),
+        ),
       ),
       child: Row(
         children: [
           // favourite button
           Container(
             decoration: BoxDecoration(
-              border: Border.all(color: kBorderGrey),
+              border: const Border.fromBorderSide(
+                BorderSide(color: kBorderGrey),
+              ),
               borderRadius: BorderRadius.circular(12),
             ),
             child: IconButton(
-              onPressed: _togglingFav ? null : _toggleFavWithConfirm,
+              onPressed:
+              _togglingFav ? null : _toggleFavWithConfirm,
               icon: Icon(
-                _isFavourite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                color: _isFavourite ? Colors.red : kPurple,
+                _isFavourite
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: _isFavourite ? Colors.red : kPurpleDark,
               ),
-              tooltip: _isFavourite ? 'Remove from favourites' : 'Add to favourites',
+              tooltip: _isFavourite
+                  ? 'Remove from favourites'
+                  : 'Add to favourites',
             ),
           ),
 
@@ -1530,15 +1622,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           Expanded(
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
-                foregroundColor: blocked ? Colors.grey : kTextDark,
-                side: BorderSide(color: blocked ? Colors.grey.shade400 : kBorderGrey),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                foregroundColor:
+                blocked ? Colors.grey : kTextDark,
+                side: BorderSide(
+                  color: blocked
+                      ? Colors.grey.shade400
+                      : kBorderGrey,
+                ),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               onPressed: blocked ? null : _handleAddToCart,
               child: Text(
                 blocked ? 'Out of stock' : 'Add to cart',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -1549,10 +1651,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           Expanded(
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: blocked ? Colors.grey.shade400 : kPurpleDark,
+                backgroundColor: blocked
+                    ? Colors.grey.shade400
+                    : kPurpleDark,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               onPressed: blocked
                   ? null
@@ -1579,7 +1686,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               },
               child: Text(
                 blocked ? 'Unavailable' : 'Buy now',
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),
@@ -1663,7 +1772,8 @@ class _RelatedProductCard extends StatelessWidget {
           ),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
           children: [
             AspectRatio(
               aspectRatio: 1,
@@ -1679,7 +1789,8 @@ class _RelatedProductCard extends StatelessWidget {
                           ? Container(
                         color: Colors.grey.shade200,
                         child: const Icon(
-                          Icons.image_not_supported_outlined,
+                          Icons
+                              .image_not_supported_outlined,
                           color: Colors.grey,
                         ),
                       )
@@ -1694,13 +1805,16 @@ class _RelatedProductCard extends StatelessWidget {
                       left: 8,
                       top: 8,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
+                        padding:
+                        const EdgeInsets.symmetric(
                           horizontal: 6,
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
-                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.black
+                              .withOpacity(0.7),
+                          borderRadius:
+                          BorderRadius.circular(8),
                         ),
                         child: Text(
                           category,
@@ -1718,13 +1832,15 @@ class _RelatedProductCard extends StatelessWidget {
                       right: 8,
                       top: 8,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
+                        padding:
+                        const EdgeInsets.symmetric(
                           horizontal: 6,
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
                           color: Colors.red.shade600,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius:
+                          BorderRadius.circular(8),
                         ),
                         child: Text(
                           '-$discountPercent%',
@@ -1741,15 +1857,18 @@ class _RelatedProductCard extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              padding: const EdgeInsets.fromLTRB(
+                  10, 8, 10, 8),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     name,
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow:
+                    TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
@@ -1758,15 +1877,19 @@ class _RelatedProductCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   hasDiscount
                       ? Row(
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisSize:
+                    MainAxisSize.min,
                     children: [
                       Text(
                         '฿ ${fmtBaht(discounted)}',
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        overflow: TextOverflow
+                            .ellipsis,
+                        style:
+                        const TextStyle(
                           color: Colors.red,
-                          fontWeight: FontWeight.w800,
+                          fontWeight:
+                          FontWeight.w800,
                           fontSize: 14,
                           height: 1.0,
                         ),
@@ -1775,12 +1898,18 @@ class _RelatedProductCard extends StatelessWidget {
                       Text(
                         '฿ ${fmtBaht(priceRaw)}',
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        overflow: TextOverflow
+                            .ellipsis,
                         style: TextStyle(
-                          color: Colors.grey.shade600,
-                          decoration: TextDecoration.lineThrough,
-                          decorationThickness: 2,
-                          fontWeight: FontWeight.w600,
+                          color: Colors
+                              .grey.shade600,
+                          decoration:
+                          TextDecoration
+                              .lineThrough,
+                          decorationThickness:
+                          2,
+                          fontWeight:
+                          FontWeight.w600,
                           fontSize: 11,
                           height: 1.0,
                         ),
@@ -1788,11 +1917,15 @@ class _RelatedProductCard extends StatelessWidget {
                     ],
                   )
                       : Text(
-                    priceRaw == 0 ? '' : '฿ ${fmtBaht(priceRaw)}',
+                    priceRaw == 0
+                        ? ''
+                        : '฿ ${fmtBaht(priceRaw)}',
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow:
+                    TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontWeight: FontWeight.w700,
+                      fontWeight:
+                      FontWeight.w700,
                       fontSize: 14,
                       height: 1.0,
                     ),
@@ -1800,16 +1933,23 @@ class _RelatedProductCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      Icon(Icons.storefront_rounded, size: 13, color: Colors.grey.shade700),
+                      Icon(
+                        Icons.storefront_rounded,
+                        size: 13,
+                        color:
+                        Colors.grey.shade700,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           sellerNameFromRow,
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          overflow: TextOverflow
+                              .ellipsis,
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey.shade700,
+                            color:
+                            Colors.grey.shade700,
                             height: 1.0,
                           ),
                         ),
@@ -1859,13 +1999,16 @@ class _CommentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding:
+      const EdgeInsets.only(bottom: 16),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
         children: [
           CircleAvatar(
             radius: 18,
-            backgroundColor: Colors.grey.shade300,
+            backgroundColor:
+            Colors.grey.shade300,
             child: const Icon(
               Icons.person,
               color: Colors.white,
@@ -1878,11 +2021,14 @@ class _CommentTile extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: subtleBg,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: borderGrey),
+                borderRadius:
+                BorderRadius.circular(12),
+                border: Border.all(
+                    color: borderGrey),
               ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
                   // Name + timestamp
                   Row(
@@ -1891,7 +2037,8 @@ class _CommentTile extends StatelessWidget {
                         child: Text(
                           authorName,
                           style: TextStyle(
-                            fontWeight: FontWeight.w600,
+                            fontWeight:
+                            FontWeight.w600,
                             fontSize: 13,
                             color: textDark,
                           ),
@@ -1922,31 +2069,47 @@ class _CommentTile extends StatelessWidget {
                   if (canEdit) ...[
                     const SizedBox(height: 8),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                      mainAxisAlignment:
+                      MainAxisAlignment.end,
                       children: [
                         TextButton(
                           style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding:
+                            const EdgeInsets
+                                .symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             minimumSize: Size.zero,
                             foregroundColor: purple,
                           ),
                           onPressed: onEdit,
                           child: const Text(
                             'Edit',
-                            style: TextStyle(fontSize: 12),
+                            style: TextStyle(
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
                         TextButton(
                           style: TextButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            foregroundColor:
+                            Colors.red,
+                            padding:
+                            const EdgeInsets
+                                .symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             minimumSize: Size.zero,
                           ),
                           onPressed: onDelete,
                           child: const Text(
                             'Delete',
-                            style: TextStyle(fontSize: 12),
+                            style: TextStyle(
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                       ],
@@ -1979,7 +2142,8 @@ class _CommentsSheet extends StatefulWidget {
   final Future<void> Function(
       Map<String, dynamic> commentRow,
       ) onRequestEditComment;
-  final Future<void> Function(int commentId) onRequestDeleteComment;
+  final Future<void> Function(int commentId)
+  onRequestDeleteComment;
 
   const _CommentsSheet({
     required this.productId,
@@ -1994,15 +2158,18 @@ class _CommentsSheet extends StatefulWidget {
   });
 
   @override
-  State<_CommentsSheet> createState() => _CommentsSheetState();
+  State<_CommentsSheet> createState() =>
+      _CommentsSheetState();
 }
 
-class _CommentsSheetState extends State<_CommentsSheet> {
+class _CommentsSheetState
+    extends State<_CommentsSheet> {
   bool _loading = true;
   String? _err;
   List<Map<String, dynamic>> _all = [];
 
-  final TextEditingController _sheetCommentCtrl = TextEditingController();
+  final TextEditingController _sheetCommentCtrl =
+  TextEditingController();
   bool _sendingNew = false;
 
   @override
@@ -2111,10 +2278,14 @@ class _CommentsSheetState extends State<_CommentsSheet> {
           left: 16,
           right: 16,
           top: 12,
-          bottom: MediaQuery.of(context).padding.bottom + 16,
+          bottom:
+          MediaQuery.of(context).padding.bottom +
+              16,
         ),
         child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.7,
+          height:
+          MediaQuery.of(context).size.height *
+              0.7,
           child: Column(
             crossAxisAlignment:
             CrossAxisAlignment.start,
@@ -2126,7 +2297,8 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                   height: 4,
                   decoration: BoxDecoration(
                     color: Colors.grey.shade400,
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius:
+                    BorderRadius.circular(999),
                   ),
                 ),
               ),
@@ -2173,7 +2345,8 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                               color: textLight,
                             ),
                             filled: true,
-                            fillColor: Colors.white,
+                            fillColor:
+                            Colors.white,
                             contentPadding:
                             const EdgeInsets
                                 .symmetric(
@@ -2183,18 +2356,26 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                             enabledBorder:
                             OutlineInputBorder(
                               borderRadius:
-                              BorderRadius.circular(8),
-                              borderSide: BorderSide(
-                                color: borderGrey,
+                              BorderRadius
+                                  .circular(
+                                  8),
+                              borderSide:
+                              BorderSide(
+                                color:
+                                borderGrey,
                                 width: 1.2,
                               ),
                             ),
                             focusedBorder:
                             OutlineInputBorder(
                               borderRadius:
-                              BorderRadius.circular(8),
-                              borderSide: BorderSide(
-                                color: purpleDark,
+                              BorderRadius
+                                  .circular(
+                                  8),
+                              borderSide:
+                              BorderSide(
+                                color:
+                                purpleDark,
                                 width: 1.2,
                               ),
                             ),
@@ -2202,33 +2383,51 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                         ),
                         const SizedBox(height: 8),
                         Align(
-                          alignment: Alignment.centerRight,
+                          alignment: Alignment
+                              .centerRight,
                           child: ElevatedButton(
-                            onPressed: _sendingNew ? null : _handlePostNew,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: purpleDark,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
+                            onPressed: _sendingNew
+                                ? null
+                                : _handlePostNew,
+                            style: ElevatedButton
+                                .styleFrom(
+                              backgroundColor:
+                              purpleDark,
+                              foregroundColor:
+                              Colors.white,
+                              padding:
+                              const EdgeInsets
+                                  .symmetric(
                                 horizontal: 16,
                                 vertical: 10,
                               ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                              shape:
+                              RoundedRectangleBorder(
+                                borderRadius:
+                                BorderRadius
+                                    .circular(
+                                    10),
                               ),
                             ),
                             child: _sendingNew
                                 ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
+                              child:
+                              CircularProgressIndicator(
+                                strokeWidth:
+                                2,
+                                color: Colors
+                                    .white,
                               ),
                             )
                                 : const Text(
                               'Post',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
+                              style:
+                              TextStyle(
+                                fontWeight:
+                                FontWeight
+                                    .w600,
                               ),
                             ),
                           ),
@@ -2246,13 +2445,16 @@ class _CommentsSheetState extends State<_CommentsSheet> {
               if (_loading)
                 const Center(
                   child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(),
+                    padding:
+                    EdgeInsets.all(24),
+                    child:
+                    CircularProgressIndicator(),
                   ),
                 )
               else if (_err != null)
                 Padding(
-                  padding: const EdgeInsets.all(24.0),
+                  padding:
+                  const EdgeInsets.all(24.0),
                   child: Text(
                     'Error loading comments:\n$_err',
                     style: const TextStyle(
@@ -2262,7 +2464,8 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                 )
               else if (_all.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.all(24.0),
+                    padding:
+                    const EdgeInsets.all(24.0),
                     child: Text(
                       'No comments yet.',
                       style: TextStyle(
@@ -2275,23 +2478,51 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                   Expanded(
                     child: ListView.builder(
                       itemCount: _all.length,
-                      itemBuilder: (context, index) {
-                        final c = _all[index];
-                        final mine = c['is_mine'] == true;
-                        final cmtId = c['id'] as int?;
+                      itemBuilder:
+                          (context, index) {
+                        final c =
+                        _all[index];
+                        final mine =
+                            c['is_mine'] == true;
+                        final cmtId =
+                        c['id'] as int?;
 
                         return _CommentTile(
-                          authorName: (c['author_name'] ?? 'User').toString(),
-                          content: (c['content'] ?? '').toString(),
-                          createdAt: (c['created_at'] ?? '').toString(),
+                          authorName:
+                          (c['author_name'] ??
+                              'User')
+                              .toString(),
+                          content:
+                          (c['content'] ?? '')
+                              .toString(),
+                          createdAt:
+                          (c['created_at'] ??
+                              '')
+                              .toString(),
                           canEdit: mine,
                           purple: purple,
-                          borderGrey: borderGrey,
+                          borderGrey:
+                          borderGrey,
                           subtleBg: subtleBg,
                           textDark: textDark,
-                          textLight: textLight,
-                          onEdit: (mine && cmtId != null) ? () => _handleEdit(c) : null,
-                          onDelete: (mine && cmtId != null) ? () => _handleDelete(cmtId) : null,
+                          textLight:
+                          textLight,
+                          onEdit:
+                          (mine &&
+                              cmtId !=
+                                  null)
+                              ? () =>
+                              _handleEdit(
+                                  c)
+                              : null,
+                          onDelete:
+                          (mine &&
+                              cmtId !=
+                                  null)
+                              ? () =>
+                              _handleDelete(
+                                  cmtId)
+                              : null,
                         );
                       },
                     ),

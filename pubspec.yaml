@@ -45,6 +45,7 @@ dependencies:
   url_launcher: ^6.3.2
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.14.1  # or latest
   flutter_test:
     sdk: flutter
 
@@ -73,5 +74,15 @@ flutter:
      - assets/banners/christmas_sale.png
      - assets/banners/promotion.png
      - assets/banners/qr_payment.png
+     - assets/images/heinthawsitt.jpeg
+     - assets/images/htetaungthat.png
+     - assets/images/paizayoo.png
+
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/muan_tok_logo.png"
+  min_sdk_android: 21
 
 

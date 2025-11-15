@@ -22,15 +22,21 @@ void _openFavourites(BuildContext context) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               LUCID THEME TOKENS                            */
+/*                               LUCID THEME TOKENS                           */
 /* -------------------------------------------------------------------------- */
 
-const kLucidPrimary = Color(0xFF7C3AED);  // core purple
+const kLucidPrimary = Color(0xFF7C3AED); // core purple
 const kLucidPrimaryLite = Color(0xFFD8BEE5); // your requested icon tint
 const kLucidShadow = Color(0x14000000);
 
+const kLucidBg = Color(0xFFF5F3FF);
+const kLucidSurface = Colors.white;
+const kLucidText = Color(0xFF111827);
+const kLucidMuted = Color(0xFF6B7280);
+const kLucidBorder = Color(0xFFE5E7EB);
+
 /* -------------------------------------------------------------------------- */
-/*                        OUT-OF-STOCK VISIBILITY HELPERS                      */
+/*                        OUT-OF-STOCK VISIBILITY HELPERS                     */
 /* -------------------------------------------------------------------------- */
 
 bool _isAdminViewer() => SupabaseService.isAdmin;
@@ -67,7 +73,7 @@ bool _isOutOfStockForViewer(Map<String, dynamic> p) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               CATEGORY MODEL                                */
+/*                               CATEGORY MODEL                               */
 /* -------------------------------------------------------------------------- */
 
 class _Category {
@@ -88,7 +94,7 @@ const _categories = <_Category>[
 ];
 
 /* -------------------------------------------------------------------------- */
-/*                               PRICE HELPERS                                 */
+/*                               PRICE HELPERS                                */
 /* -------------------------------------------------------------------------- */
 
 String _fmtBaht(num value) {
@@ -106,7 +112,7 @@ num _parseNum(dynamic v) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                 SHOP SCREEN                                 */
+/*                                 SHOP SCREEN                                */
 /* -------------------------------------------------------------------------- */
 
 class ShopScreen extends StatefulWidget {
@@ -127,7 +133,7 @@ class _ShopScreenState extends State<ShopScreen> {
     final safe = MediaQuery.of(context).padding;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: kLucidBg,
       body: Stack(
         children: [
           // body
@@ -152,8 +158,19 @@ class _ShopScreenState extends State<ShopScreen> {
                 // buy/sell pill
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.30),
                     borderRadius: BorderRadius.circular(20),
+                    gradient: const LinearGradient(
+                      colors: [kLucidPrimary, Color(0xFFFB7185)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: kLucidShadow,
+                        blurRadius: 12,
+                        offset: Offset(0, 6),
+                      ),
+                    ],
                   ),
                   child: Row(
                     children: [
@@ -179,7 +196,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openSearch(context),
                         child: const Icon(
                           Icons.search,
-                          color: kLucidPrimaryLite,
+                          color: kLucidPrimary,
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -193,7 +210,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openFavourites(context),
                         child: const Icon(
                           Icons.favorite_border_rounded,
-                          color: kLucidPrimaryLite,
+                          color: kLucidPrimary,
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -207,13 +224,14 @@ class _ShopScreenState extends State<ShopScreen> {
                         tooltip: 'My Cart',
                         icon: const Icon(
                           Icons.shopping_cart_outlined,
-                          color: kLucidPrimaryLite,
+                          color: kLucidPrimary,
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
                         onPressed: () {
                           Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const CartScreen()),
+                            MaterialPageRoute(
+                                builder: (_) => const CartScreen()),
                           );
                         },
                       ),
@@ -235,17 +253,19 @@ class _ShopScreenState extends State<ShopScreen> {
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
+          color: isSelected ? kLucidSurface : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.black : Colors.white,
+            color: isSelected ? kLucidText : Colors.white,
             fontWeight: FontWeight.bold,
+            fontSize: 13,
           ),
         ),
       ),
@@ -254,7 +274,7 @@ class _ShopScreenState extends State<ShopScreen> {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                BUY HOME VIEW                                */
+/*                                BUY HOME VIEW                               */
 /* -------------------------------------------------------------------------- */
 
 enum _RecSort { none, ratingHighLow, ratingLowHigh }
@@ -418,15 +438,22 @@ class _BuyHomeState extends State<_BuyHome> {
       },
       itemBuilder: (_) => const [
         PopupMenuItem(value: _RecSort.none, child: Text('Default')),
-        PopupMenuItem(value: _RecSort.ratingHighLow, child: Text('Rating: High → Low')),
-        PopupMenuItem(value: _RecSort.ratingLowHigh, child: Text('Rating: Low → High')),
+        PopupMenuItem(
+            value: _RecSort.ratingHighLow,
+            child: Text('Rating: High → Low')),
+        PopupMenuItem(
+            value: _RecSort.ratingLowHigh,
+            child: Text('Rating: Low → High')),
       ],
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: const [
-          Icon(Icons.sort, size: 18),
+          Icon(Icons.sort, size: 18, color: kLucidMuted),
           SizedBox(width: 6),
-          Text('Sort'),
+          Text(
+            'Sort',
+            style: TextStyle(fontSize: 12, color: kLucidText),
+          ),
         ],
       ),
     );
@@ -435,6 +462,7 @@ class _BuyHomeState extends State<_BuyHome> {
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
+      color: kLucidPrimary,
       onRefresh: () async {
         await _fetchRecommended();
       },
@@ -467,19 +495,19 @@ class _BuyHomeState extends State<_BuyHome> {
 
           const SizedBox(height: 16),
 
-          // Coupons (LIVE from DB, no writes to coupons)
+          // Coupons
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
               'Coupons',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: kLucidText,
+              ),
             ),
           ),
           const SizedBox(height: 8),
-          const CouponsSection(), // live section
+          const CouponsSection(),
 
           const SizedBox(height: 16),
 
@@ -488,10 +516,10 @@ class _BuyHomeState extends State<_BuyHome> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
               'Event',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: kLucidText,
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -503,7 +531,8 @@ class _BuyHomeState extends State<_BuyHome> {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SizedBox(
                   height: 180,
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(
+                      child: CircularProgressIndicator(color: kLucidPrimary)),
                 );
               }
 
@@ -514,7 +543,7 @@ class _BuyHomeState extends State<_BuyHome> {
                   child: Container(
                     height: 160,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
+                      color: kLucidSurface,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.redAccent),
                     ),
@@ -535,15 +564,15 @@ class _BuyHomeState extends State<_BuyHome> {
                   child: Container(
                     height: 160,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
+                      color: kLucidSurface,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: kLucidBorder),
                     ),
                     alignment: Alignment.center,
                     child: Text(
                       'No active events',
                       style: TextStyle(
-                        color: Colors.grey.shade700,
+                        color: kLucidMuted,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -595,17 +624,24 @@ class _BuyHomeState extends State<_BuyHome> {
               children: [
                 Text(
                   'Recommended for you',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: kLucidText,
+                  ),
                 ),
                 const Spacer(),
                 _recSortMenu(),
                 const SizedBox(width: 6),
                 TextButton(
                   onPressed: _openViewAll,
-                  child: const Text('View all'),
+                  child: const Text(
+                    'View all',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: kLucidPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -615,11 +651,13 @@ class _BuyHomeState extends State<_BuyHome> {
           if (_loading)
             const Padding(
               padding: EdgeInsets.only(top: 24),
-              child: Center(child: CircularProgressIndicator()),
+              child: Center(
+                  child: CircularProgressIndicator(color: kLucidPrimary)),
             )
           else if (_error != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Text(
                 'Error: $_error',
                 style: const TextStyle(color: Colors.red),
@@ -628,7 +666,10 @@ class _BuyHomeState extends State<_BuyHome> {
           else if (_recommended.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                child: Text('No products yet.'),
+                child: Text(
+                  'No products yet.',
+                  style: TextStyle(color: kLucidMuted),
+                ),
               )
             else
               const SizedBox.shrink(),
@@ -767,52 +808,79 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = selected ? Colors.black : Colors.white;
-    final fg = selected ? Colors.white : Colors.black;
+    final bool isSelected = selected;
+
+    final Color bg = isSelected ? kLucidPrimary : kLucidSurface;
+    final Color borderColor = isSelected ? kLucidPrimary : kLucidBorder;
+    final Color iconColor = isSelected ? Colors.white : kLucidPrimary;
+    final Color textColor = isSelected ? Colors.white : kLucidText;
+    final Color hintColor =
+    isSelected ? Colors.white.withOpacity(0.8) : kLucidMuted;
 
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
         width: width,
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: selected ? Colors.black : Colors.grey.shade300,
-            width: 1.2,
+            color: borderColor,
+            width: 1.3,
           ),
-          boxShadow: [
-            if (selected)
-              BoxShadow(
-                color: kLucidShadow,
-                blurRadius: 10,
-                offset: const Offset(0, 6),
-              ),
+          boxShadow: const [
+            BoxShadow(
+              color: kLucidShadow,
+              blurRadius: 12,
+              offset: Offset(0, 6),
+            ),
           ],
         ),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: fg, size: 32),
+            // Icon in a soft circular chip
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected
+                    ? Colors.white.withOpacity(0.16)
+                    : kLucidPrimary.withOpacity(0.08),
+              ),
+              child: Icon(
+                icon,
+                color: iconColor,
+                size: 28,
+              ),
+            ),
             const SizedBox(height: 10),
+
+            // Label
             Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: fg,
-                fontWeight: FontWeight.w600,
+                color: textColor,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
               ),
             ),
+
             if (showSwipeHint) ...[
               const SizedBox(height: 4),
               Text(
-                'Tap →',
+                'Tap to browse',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: fg.withOpacity(0.7),
-                  fontSize: 12,
+                  color: hintColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -853,7 +921,10 @@ class _ProductCard extends StatelessWidget {
 
   List<String> _extractImageUrls(dynamic v) {
     if (v is List) {
-      return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+      return v
+          .map((e) => e?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
     } else if (v is String) {
       return [v];
     }
@@ -882,7 +953,8 @@ class _ProductCard extends StatelessWidget {
         ? data['discount_percent'] as int
         : int.tryParse('${data['discount_percent'] ?? 0}') ?? 0;
 
-    final bool hasDiscount = isEvent && discountPercent > 0 && priceRaw > 0;
+    final bool hasDiscount =
+        isEvent && discountPercent > 0 && priceRaw > 0;
     final num discounted =
     hasDiscount ? (priceRaw * (100 - discountPercent)) / 100 : priceRaw;
 
@@ -893,7 +965,9 @@ class _ProductCard extends StatelessWidget {
     final Map<String, dynamic>? sellerMap =
         (data['seller'] is Map ? data['seller'] as Map<String, dynamic> : null) ??
             (data['users'] is Map ? data['users'] as Map<String, dynamic> : null) ??
-            (data['profiles'] is Map ? data['profiles'] as Map<String, dynamic> : null);
+            (data['profiles'] is Map
+                ? data['profiles'] as Map<String, dynamic>
+                : null);
 
     final sellerNameFromRow = (sellerMap?['full_name'] ??
         data['seller_full_name'] ??
@@ -902,13 +976,15 @@ class _ProductCard extends StatelessWidget {
         ?.toString();
 
     final stock = _asInt(data['stock']);
-    final showOutBadge = stock <= 0 && !_isOutOfStockForViewer(data); // admin/owner badge
+    final showOutBadge =
+        stock <= 0 && !_isOutOfStockForViewer(data); // admin/owner badge
 
     return Material(
-      color: Colors.white,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
+        borderRadius: BorderRadius.circular(14),
         onTap: () {
           if (_isOutOfStockForViewer(data)) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -925,162 +1001,182 @@ class _ProductCard extends StatelessWidget {
             ),
           );
         },
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AspectRatio(
-              aspectRatio: 1,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: img == null
-                        ? Container(
-                      color: Colors.grey.shade200,
-                      child: const Icon(
-                        Icons.image_not_supported_outlined,
-                        color: Colors.grey,
-                      ),
-                    )
-                        : Image.network(img, fit: BoxFit.cover),
-                  ),
-                  if (category.isNotEmpty)
-                    Positioned(
-                      left: 8,
-                      top: 8,
-                      child: _CategoryValueBadge(text: category),
-                    ),
-                  if (hasDiscount)
-                    Positioned(
-                      right: 8,
-                      top: 8,
-                      child: _DiscountBadge(percent: discountPercent),
-                    ),
-                  if (showOutBadge)
-                    Positioned(
-                      left: 8,
-                      top: 8 + (category.isNotEmpty ? 28 : 0),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.70),
-                          borderRadius: BorderRadius.circular(8),
+        child: Container(
+          decoration: BoxDecoration(
+            color: kLucidSurface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: kLucidBorder),
+            boxShadow: const [
+              BoxShadow(
+                color: kLucidShadow,
+                blurRadius: 15,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AspectRatio(
+                aspectRatio: 1,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: img == null
+                          ? Container(
+                        color: kLucidBg,
+                        child: const Icon(
+                          Icons.image_not_supported_outlined,
+                          color: kLucidMuted,
                         ),
-                        child: const Text(
-                          'OUT OF STOCK',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            height: 1.0,
+                      )
+                          : Image.network(img, fit: BoxFit.cover),
+                    ),
+                    if (category.isNotEmpty)
+                      Positioned(
+                        left: 8,
+                        top: 8,
+                        child: _CategoryValueBadge(text: category),
+                      ),
+                    if (hasDiscount)
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: _DiscountBadge(percent: discountPercent),
+                      ),
+                    if (showOutBadge)
+                      Positioned(
+                        left: 8,
+                        top: 8 + (category.isNotEmpty ? 28 : 0),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.70),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'OUT OF STOCK',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              height: 1.0,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // name
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // name
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: kLucidText,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
+                    const SizedBox(height: 4),
 
-                  // ⭐ Rating row (reads `rating` or falls back to `avg_rating`)
-                  _StarRating(
-                    rating: rating,
-                    size: 13,
-                    color: kLucidPrimary,
-                    showNumber: true,
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  // price / discount
-                  hasDiscount
-                      ? Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '฿ ${_fmtBaht(discounted)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                          height: 1.0,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '฿ ${_fmtBaht(priceRaw)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          decoration: TextDecoration.lineThrough,
-                          decorationThickness: 2,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 11,
-                          height: 1.0,
-                        ),
-                      ),
-                    ],
-                  )
-                      : Text(
-                    priceRaw == 0 ? '' : '฿ ${_fmtBaht(priceRaw)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      height: 1.0,
+                    // ⭐ Rating row
+                    _StarRating(
+                      rating: rating,
+                      size: 13,
+                      color: kLucidPrimary,
+                      showNumber: true,
                     ),
-                  ),
 
-                  const SizedBox(height: 6),
+                    const SizedBox(height: 4),
 
-                  // seller row
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.storefront_rounded,
-                        size: 13,
-                        color: Colors.grey.shade700,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: sellerNameFromRow != null && sellerNameFromRow.isNotEmpty
-                            ? Text(
-                          sellerNameFromRow,
+                    // price / discount
+                    hasDiscount
+                        ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '฿ ${_fmtBaht(discounted)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey.shade700,
+                          style: const TextStyle(
+                            color: Color(0xFFDC2626),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
                             height: 1.0,
                           ),
-                        )
-                            : _SellerName(sellerId: sellerId),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '฿ ${_fmtBaht(priceRaw)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: kLucidMuted,
+                            decoration: TextDecoration.lineThrough,
+                            decorationThickness: 2,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                            height: 1.0,
+                          ),
+                        ),
+                      ],
+                    )
+                        : Text(
+                      priceRaw == 0
+                          ? ''
+                          : '฿ ${_fmtBaht(priceRaw)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        height: 1.0,
+                        color: Color(0xFFDC2626),
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+
+                    const SizedBox(height: 6),
+
+                    // seller row
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.storefront_rounded,
+                          size: 13,
+                          color: kLucidMuted,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: sellerNameFromRow != null &&
+                              sellerNameFromRow.isNotEmpty
+                              ? Text(
+                            sellerNameFromRow,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: kLucidMuted,
+                              height: 1.0,
+                            ),
+                          )
+                              : _SellerName(sellerId: sellerId),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1101,7 +1197,8 @@ class CategoryProductsScreen extends StatefulWidget {
   });
 
   @override
-  State<CategoryProductsScreen> createState() => _CategoryProductsScreenState();
+  State<CategoryProductsScreen> createState() =>
+      _CategoryProductsScreenState();
 }
 
 class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
@@ -1154,22 +1251,31 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        elevation: 0.5,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        elevation: 0,
+        backgroundColor: kLucidBg,
+        foregroundColor: kLucidText,
         title: Row(
           children: [
-            Icon(widget.icon, size: 20),
+            Icon(widget.icon, size: 20, color: kLucidPrimary),
             const SizedBox(width: 8),
-            Text(widget.label),
+            Text(
+              widget.label,
+              style: const TextStyle(
+                color: kLucidText,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),
-      backgroundColor: Colors.white,
+      backgroundColor: kLucidBg,
       body: RefreshIndicator(
+        color: kLucidPrimary,
         onRefresh: _fetch,
         child: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(
+          child: CircularProgressIndicator(color: kLucidPrimary),
+        )
             : _error != null
             ? Center(
           child: Text(
@@ -1179,7 +1285,10 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
         )
             : _items.isEmpty
             ? const Center(
-          child: Text('No products in this category.'),
+          child: Text(
+            'No products in this category.',
+            style: TextStyle(color: kLucidMuted),
+          ),
         )
             : _ProductGrid(products: _items),
       ),
@@ -1189,7 +1298,13 @@ class _CategoryProductsScreenState extends State<CategoryProductsScreen> {
 
 /* ------------------------------ VIEW ALL SCREEN --------------------------- */
 
-enum _AllSort { newest, priceLowHigh, priceHighLow, ratingHighLow, ratingLowHigh }
+enum _AllSort {
+  newest,
+  priceLowHigh,
+  priceHighLow,
+  ratingHighLow,
+  ratingLowHigh,
+}
 
 class AllProductsScreen extends StatefulWidget {
   const AllProductsScreen({super.key});
@@ -1207,6 +1322,21 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
   void initState() {
     super.initState();
     _fetch();
+  }
+
+  String _labelForSort(_AllSort value) {
+    switch (value) {
+      case _AllSort.newest:
+        return 'Newest';
+      case _AllSort.priceLowHigh:
+        return 'Price: Low → High';
+      case _AllSort.priceHighLow:
+        return 'Price: High → Low';
+      case _AllSort.ratingHighLow:
+        return 'Rating: High → Low';
+      case _AllSort.ratingLowHigh:
+        return 'Rating: Low → High';
+    }
   }
 
   Future<void> _fetch() async {
@@ -1249,7 +1379,7 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
         ascending: ascending,
       );
       if (!mounted) return;
-      setState(() => _items = _visibleToViewer(list)); // filter here
+      setState(() => _items = _visibleToViewer(list)); // keep your visibility rule
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -1259,28 +1389,10 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
     }
   }
 
-  Widget _sortChip(_AllSort value, String label) {
-    final selected = _sort == value;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (s) {
-        if (!s) return;
-        setState(() => _sort = value);
-        _fetch();
-      },
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      selectedColor: Colors.black,
-      labelStyle: TextStyle(
-        color: selected ? Colors.white : Colors.black87,
-      ),
-      backgroundColor: Colors.grey.shade100,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Lucid-style app bar
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -1288,24 +1400,37 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         titleSpacing: 0,
-        elevation: 0.5,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        title: const Text('All Products'),
+        elevation: 0,
+        backgroundColor: kLucidBg,
+        foregroundColor: kLucidText,
+        title: const Text(
+          'All Products',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: kLucidText,
+          ),
+        ),
       ),
-      backgroundColor: Colors.white,
+      backgroundColor: kLucidBg,
       body: RefreshIndicator(
+        color: kLucidPrimary,
         onRefresh: _fetch,
         child: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(
+          child: CircularProgressIndicator(color: kLucidPrimary),
+        )
             : _error != null
             ? ListView(
-          children: const [
-            SizedBox(height: 24),
+          children: [
+            const SizedBox(height: 24),
             Center(
-              child: Text(
-                'Error loading products',
-                style: TextStyle(color: Colors.red),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Error loading products\n$_error',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.red),
+                ),
               ),
             ),
           ],
@@ -1313,30 +1438,110 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
             : ListView(
           children: [
             const SizedBox(height: 8),
+
+            // 🔽 Lucid purple sort dropdown bar
             Padding(
               padding: const EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: 8,
               ),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _sortChip(_AllSort.newest, 'Newest'),
-                  _sortChip(_AllSort.priceLowHigh, 'Price: Low → High'),
-                  _sortChip(_AllSort.priceHighLow, 'Price: High → Low'),
-                  _sortChip(_AllSort.ratingHighLow, 'Rating: High → Low'),
-                  _sortChip(_AllSort.ratingLowHigh, 'Rating: Low → High'),
-                ],
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: kLucidSurface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: kLucidBorder,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: kLucidShadow,
+                      blurRadius: 14,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    // Purple icon + title
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: kLucidPrimary.withOpacity(0.08),
+                      ),
+                      child: const Icon(
+                        Icons.tune_rounded,
+                        size: 18,
+                        color: kLucidPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Text(
+                      'Sort by',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: kLucidText,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+
+                    // Dropdown
+                    Expanded(
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<_AllSort>(
+                          isExpanded: true,
+                          value: _sort,
+                          icon: const Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: kLucidMuted,
+                          ),
+                          items: _AllSort.values.map((value) {
+                            return DropdownMenuItem<_AllSort>(
+                              value: value,
+                              child: Text(
+                                _labelForSort(value),
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: kLucidText,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() => _sort = value);
+                            _fetch();
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
+
+            // Product content
             _items.isEmpty
                 ? const Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: 24,
               ),
-              child: Center(child: Text('No products yet.')),
+              child: Center(
+                child: Text(
+                  'No products yet.',
+                  style: TextStyle(
+                    color: kLucidMuted,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
             )
                 : _ProductGrid(products: _items),
           ],
@@ -1347,7 +1552,7 @@ class _AllProductsScreenState extends State<AllProductsScreen> {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                         SELL FORM (UPDATED VERSION)                         */
+/*                         SELL FORM (UPDATED VERSION)                        */
 /* -------------------------------------------------------------------------- */
 
 class ProductInput {
@@ -1603,7 +1808,7 @@ class _SellFormState extends State<SellForm> {
     final theme = Theme.of(context);
 
     return Material(
-      color: Colors.white,
+      color: kLucidBg,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
         child: Form(
@@ -1615,7 +1820,8 @@ class _SellFormState extends State<SellForm> {
                 children: [
                   const Text(
                     'Photos',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                   const Spacer(),
                   TextButton.icon(
@@ -1638,13 +1844,13 @@ class _SellFormState extends State<SellForm> {
                   height: 160,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: kLucidSurface,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: kLucidBorder),
                   ),
                   child: Text(
                     'Add multiple photos',
-                    style: TextStyle(color: Colors.grey.shade700),
+                    style: TextStyle(color: kLucidMuted),
                   ),
                 )
               else
@@ -1652,7 +1858,8 @@ class _SellFormState extends State<SellForm> {
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: _images.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
                     mainAxisSpacing: 8,
                     crossAxisSpacing: 8,
@@ -1679,8 +1886,9 @@ class _SellFormState extends State<SellForm> {
               _LightInput(
                 controller: _nameCtrl,
                 label: 'Product name',
-                validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Product name is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Product name is required'
+                    : null,
               ),
               const SizedBox(height: 12),
 
@@ -1689,8 +1897,9 @@ class _SellFormState extends State<SellForm> {
                 controller: _descCtrl,
                 label: 'Description',
                 maxLines: 4,
-                validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Description is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Description is required'
+                    : null,
               ),
               const SizedBox(height: 12),
 
@@ -1702,10 +1911,12 @@ class _SellFormState extends State<SellForm> {
                 items: _categories.map((c) => c.label).toList(),
                 label: 'Category',
                 onChanged: (val) {
-                  final found = _categories.firstWhere((c) => c.label == val);
+                  final found =
+                  _categories.firstWhere((c) => c.label == val);
                   setState(() => _category = found.key);
                 },
-                validator: (v) => (v == null || v.isEmpty) ? 'Select a category' : null,
+                validator: (v) =>
+                (v == null || v.isEmpty) ? 'Select a category' : null,
               ),
               const SizedBox(height: 12),
 
@@ -1760,18 +1971,20 @@ class _SellFormState extends State<SellForm> {
                   'Add to Events',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
+                    color: kLucidText,
                   ),
                 ),
               ),
               const SizedBox(height: 8),
 
               if (_loadingEvents)
-                const LinearProgressIndicator(minHeight: 2)
+                const LinearProgressIndicator(
+                    minHeight: 2, color: kLucidPrimary)
               else if (_availableEvents.isEmpty)
                 Text(
                   'No active events',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.black54,
+                    color: kLucidMuted,
                   ),
                 )
               else
@@ -1802,6 +2015,7 @@ class _SellFormState extends State<SellForm> {
                                   ev.name,
                                   style: theme.textTheme.bodyMedium?.copyWith(
                                     fontWeight: FontWeight.w600,
+                                    color: kLucidText,
                                   ),
                                 ),
 
@@ -1809,8 +2023,9 @@ class _SellFormState extends State<SellForm> {
                                 if (ev.endsAtDisplay.isNotEmpty)
                                   Text(
                                     'Ends ${ev.endsAtDisplay}',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: Colors.grey[600],
+                                    style:
+                                    theme.textTheme.bodySmall?.copyWith(
+                                      color: kLucidMuted,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -1824,11 +2039,13 @@ class _SellFormState extends State<SellForm> {
                                         width: 110,
                                         child: TextFormField(
                                           initialValue:
-                                          _selectedEvents[ev.id]?.toString() ??
+                                          _selectedEvents[ev.id]
+                                              ?.toString() ??
                                               '0',
                                           keyboardType: TextInputType.number,
                                           inputFormatters: [
-                                            FilteringTextInputFormatter.digitsOnly,
+                                            FilteringTextInputFormatter
+                                                .digitsOnly,
                                           ],
                                           decoration: const InputDecoration(
                                             isDense: true,
@@ -1836,7 +2053,8 @@ class _SellFormState extends State<SellForm> {
                                             border: OutlineInputBorder(),
                                           ),
                                           onChanged: (val) {
-                                            final parsed = int.tryParse(val) ?? 0;
+                                            final parsed =
+                                                int.tryParse(val) ?? 0;
                                             setState(() {
                                               _selectedEvents[ev.id] =
                                                   parsed.clamp(0, 100);
@@ -1873,7 +2091,7 @@ class _SellFormState extends State<SellForm> {
                       : const Icon(Icons.publish_outlined),
                   label: Text(_submitting ? 'Publishing...' : 'Publish'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
+                    backgroundColor: kLucidPrimary,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -1907,7 +2125,8 @@ class FullscreenGallery extends StatefulWidget {
 }
 
 class _FullscreenGalleryState extends State<FullscreenGallery> {
-  late final PageController _ctrl = PageController(initialPage: widget.initialIndex);
+  late final PageController _ctrl =
+  PageController(initialPage: widget.initialIndex);
 
   @override
   Widget build(BuildContext context) {
@@ -1954,7 +2173,8 @@ class _CategoryValueBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding:
+      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.black.withOpacity(0.65),
         borderRadius: BorderRadius.circular(8),
@@ -1979,7 +2199,8 @@ class _DiscountBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding:
+      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.red.shade600,
         borderRadius: BorderRadius.circular(8),
@@ -2000,10 +2221,10 @@ class _DiscountBadge extends StatelessWidget {
 /* ------------------------------ STAR RATING -------------------------------- */
 
 class _StarRating extends StatelessWidget {
-  final double rating;        // 0..5
-  final double size;          // icon size
-  final bool showNumber;      // show numeric score
-  final Color color;          // star color (Lucid purple)
+  final double rating; // 0..5
+  final double size; // icon size
+  final bool showNumber; // show numeric score
+  final Color color; // star color (Lucid purple)
 
   const _StarRating({
     super.key,
@@ -2020,7 +2241,9 @@ class _StarRating extends StatelessWidget {
     for (int i = 1; i <= 5; i++) {
       final icon = r >= i
           ? Icons.star_rounded
-          : (r >= i - 0.5 ? Icons.star_half_rounded : Icons.star_border_rounded);
+          : (r >= i - 0.5
+          ? Icons.star_half_rounded
+          : Icons.star_border_rounded);
       stars.add(Icon(icon, size: size, color: color));
     }
 
@@ -2032,7 +2255,12 @@ class _StarRating extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             r.toStringAsFixed(1),
-            style: TextStyle(fontSize: size - 1, fontWeight: FontWeight.w700, height: 1),
+            style: TextStyle(
+              fontSize: size - 1,
+              fontWeight: FontWeight.w700,
+              height: 1,
+              color: kLucidText,
+            ),
           ),
         ],
       ],
@@ -2129,7 +2357,10 @@ BoxDecoration _lcGlass([double r = 12]) => BoxDecoration(
   borderRadius: BorderRadius.circular(r),
   border: Border.all(color: const Color(0x11000000)),
   boxShadow: const [
-    BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 6))
+    BoxShadow(
+        color: Color(0x14000000),
+        blurRadius: 12,
+        offset: Offset(0, 6))
   ],
 );
 
@@ -2139,12 +2370,14 @@ class _CouponsSectionState extends State<CouponsSection> {
   @override
   void initState() {
     super.initState();
-    _future = VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
+    _future =
+        VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
   }
 
   Future<void> _refresh() async {
     setState(() {
-      _future = VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
+      _future =
+          VoucherService.fetchActiveCoupons(excludeAlreadyClaimed: true);
     });
   }
 
@@ -2170,7 +2403,8 @@ class _CouponsSectionState extends State<CouponsSection> {
         if (snap.connectionState != ConnectionState.done) {
           return const Padding(
             padding: EdgeInsets.all(12),
-            child: Center(child: CircularProgressIndicator(color: _lcPrimary)),
+            child: Center(
+                child: CircularProgressIndicator(color: _lcPrimary)),
           );
         }
 
@@ -2181,7 +2415,8 @@ class _CouponsSectionState extends State<CouponsSection> {
               height: 120,
               alignment: Alignment.center,
               decoration: _lcGlass(12).copyWith(
-                border: Border.all(color: const Color(0x26E11D48)),
+                border:
+                Border.all(color: const Color(0x26E11D48)),
               ),
               child: Text(
                 'Failed to load coupons:\n${snap.error}',
@@ -2201,7 +2436,9 @@ class _CouponsSectionState extends State<CouponsSection> {
               alignment: Alignment.center,
               decoration: _lcGlass(12),
               child: const Text('No coupons available',
-                  style: TextStyle(color: _lcMuted, fontWeight: FontWeight.w600)),
+                  style: TextStyle(
+                      color: _lcMuted,
+                      fontWeight: FontWeight.w600)),
             ),
           );
         }
@@ -2232,28 +2469,33 @@ class _CouponsSectionState extends State<CouponsSection> {
                           padding: const EdgeInsets.all(6),
                           decoration: const BoxDecoration(
                             shape: BoxShape.circle,
-                            gradient: LinearGradient(colors: [_lcPrimary, _lcPrimary2]),
+                            gradient: LinearGradient(
+                                colors: [_lcPrimary, _lcPrimary2]),
                           ),
-                          child: const Icon(Icons.local_offer_rounded,
-                              color: Colors.white, size: 16),
+                          child: const Icon(
+                              Icons.local_offer_rounded,
+                              color: Colors.white,
+                              size: 16),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w800)),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w800)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
 
-                    // Subtitle only (no code chip)
+                    // Subtitle only
                     Text(
                       _subtitle(c),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: _lcMuted),
+                      style: const TextStyle(
+                          fontSize: 12, color: _lcMuted),
                     ),
 
                     const Spacer(),
@@ -2264,35 +2506,44 @@ class _CouponsSectionState extends State<CouponsSection> {
                       child: ElevatedButton(
                         onPressed: () async {
                           try {
-                            await VoucherService.claimCouponByCode(code);
+                            await VoucherService
+                                .claimCouponByCode(code);
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('🎉 Coupon claimed: $title')),
-                            );
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(SnackBar(
+                                content: Text(
+                                    '🎉 Coupon claimed: $title')));
                             await _refresh();
                           } on StateError catch (e) {
                             if (!mounted) return;
                             ScaffoldMessenger.of(context)
-                                .showSnackBar(SnackBar(content: Text(e.message)));
+                                .showSnackBar(SnackBar(
+                                content: Text(e.message)));
                           } on PostgrestException catch (e) {
                             if (!mounted) return;
                             final msg = (e.code == '23505')
                                 ? 'You already claimed this coupon.'
                                 : (e.code == '42501')
                                 ? 'Permission denied.'
-                                : (e.message ?? 'Cannot claim coupon.');
+                                : (e.message ??
+                                'Cannot claim coupon.');
                             ScaffoldMessenger.of(context)
-                                .showSnackBar(SnackBar(content: Text(msg)));
+                                .showSnackBar(SnackBar(
+                                content: Text(msg)));
                           } catch (e) {
                             if (!mounted) return;
                             ScaffoldMessenger.of(context)
-                                .showSnackBar(SnackBar(content: Text('Error: $e')));
+                                .showSnackBar(SnackBar(
+                                content:
+                                Text('Error: $e')));
                           }
                         },
                         style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          padding:
+                          const EdgeInsets.symmetric(vertical: 10),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                              borderRadius:
+                              BorderRadius.circular(10)),
                           foregroundColor: Colors.white,
                           backgroundColor: _lcPrimary,
                         ),
@@ -2343,15 +2594,16 @@ class _LightInput extends StatelessWidget {
         labelText: label,
         prefixText: prefixText,
         filled: true,
-        fillColor: Colors.grey.shade100,
-        labelStyle: TextStyle(color: Colors.grey.shade700),
+        fillColor: kLucidSurface,
+        labelStyle: const TextStyle(color: kLucidMuted),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderSide: const BorderSide(color: kLucidBorder),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade600),
+          borderSide:
+          const BorderSide(color: kLucidPrimary, width: 1.5),
         ),
         errorBorder: const OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -2378,15 +2630,17 @@ class _LightDropdown extends FormField<String> {
         decoration: InputDecoration(
           labelText: label,
           filled: true,
-          fillColor: Colors.grey.shade100,
-          labelStyle: TextStyle(color: Colors.grey.shade700),
+          fillColor: kLucidSurface,
+          labelStyle: const TextStyle(color: kLucidMuted),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey.shade300),
+            borderSide:
+            const BorderSide(color: kLucidBorder),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey.shade600),
+            borderSide: const BorderSide(
+                color: kLucidPrimary, width: 1.5),
           ),
           errorBorder: const OutlineInputBorder(
             borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -2418,6 +2672,14 @@ class _LightDropdown extends FormField<String> {
 
 /* ---------------------------- PRODUCT SEARCH ---------------------------- */
 
+enum _SearchSort {
+  relevance,
+  priceLowHigh,
+  priceHighLow,
+  ratingHighLow,
+  ratingLowHigh,
+}
+
 class ProductSearchDelegate extends SearchDelegate<String?> {
   final _sb = Supabase.instance.client;
 
@@ -2428,11 +2690,45 @@ class ProductSearchDelegate extends SearchDelegate<String?> {
   TextInputType get keyboardType => TextInputType.text;
 
   @override
+  TextStyle? get searchFieldStyle => const TextStyle(
+    color: kLucidText,
+    fontSize: 16,
+    fontWeight: FontWeight.w500,
+  );
+
+  @override
+  ThemeData appBarTheme(BuildContext context) {
+    final base = Theme.of(context);
+    return base.copyWith(
+      scaffoldBackgroundColor: kLucidBg,
+      appBarTheme: base.appBarTheme.copyWith(
+        backgroundColor: kLucidBg,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: kLucidPrimary),
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: InputBorder.none,
+        hintStyle: TextStyle(
+          color: kLucidMuted,
+          fontSize: 15,
+        ),
+      ),
+      textTheme: base.textTheme.copyWith(
+        titleLarge: const TextStyle(
+          color: kLucidText,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  @override
   List<Widget> buildActions(BuildContext context) {
     return [
       if (query.isNotEmpty)
         IconButton(
-          icon: const Icon(Icons.clear),
+          icon: const Icon(Icons.clear, color: kLucidMuted),
           onPressed: () => query = '',
           tooltip: 'Clear',
         ),
@@ -2442,7 +2738,7 @@ class ProductSearchDelegate extends SearchDelegate<String?> {
   @override
   Widget? buildLeading(BuildContext context) {
     return IconButton(
-      icon: const Icon(Icons.arrow_back),
+      icon: const Icon(Icons.arrow_back, color: kLucidPrimary),
       onPressed: () => close(context, null),
       tooltip: 'Back',
     );
@@ -2459,15 +2755,89 @@ class ProductSearchDelegate extends SearchDelegate<String?> {
   }
 }
 
-// pulls products from Supabase based on queryText
-class _SearchList extends StatelessWidget {
+// pulls products from Supabase based on queryText + filter/sort
+class _SearchList extends StatefulWidget {
   final String queryText;
   final SupabaseClient sb;
   const _SearchList({required this.queryText, required this.sb});
 
+  @override
+  State<_SearchList> createState() => _SearchListState();
+}
+
+class _SearchListState extends State<_SearchList> {
+  late Future<List<Map<String, dynamic>>> _future;
+
+  _SearchSort _sort = _SearchSort.relevance;
+  String _selectedCategory = 'All'; // uses same categories as shop
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _fetch();
+  }
+
+  double _ratingOf(Map<String, dynamic> p) {
+    final v = p['rating'] ?? p['avg_rating'] ?? p['avgRating'] ?? 0;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
+  String _sortLabel(_SearchSort s) {
+    switch (s) {
+      case _SearchSort.relevance:
+        return 'Relevance';
+      case _SearchSort.priceLowHigh:
+        return 'Price: Low → High';
+      case _SearchSort.priceHighLow:
+        return 'Price: High → Low';
+      case _SearchSort.ratingHighLow:
+        return 'Rating: High → Low';
+      case _SearchSort.ratingLowHigh:
+        return 'Rating: Low → High';
+    }
+  }
+
+  List<Map<String, dynamic>> _applyFilterAndSort(
+      List<Map<String, dynamic>> items) {
+    // 1) Category filter
+    final filteredByCategory = _selectedCategory == 'All'
+        ? items
+        : items.where((p) {
+      final cat = (p['category'] ?? '').toString();
+      return cat == _selectedCategory;
+    }).toList();
+
+    // 2) Sort
+    final list = [...filteredByCategory];
+
+    switch (_sort) {
+      case _SearchSort.relevance:
+      // keep current order (id desc from fetch)
+        break;
+      case _SearchSort.priceLowHigh:
+        list.sort(
+                (a, b) => _parseNum(a['price']).compareTo(_parseNum(b['price'])));
+        break;
+      case _SearchSort.priceHighLow:
+        list.sort(
+                (a, b) => _parseNum(b['price']).compareTo(_parseNum(a['price'])));
+        break;
+      case _SearchSort.ratingHighLow:
+        list.sort((a, b) => _ratingOf(b).compareTo(_ratingOf(a)));
+        break;
+      case _SearchSort.ratingLowHigh:
+        list.sort((a, b) => _ratingOf(a).compareTo(_ratingOf(b)));
+        break;
+    }
+
+    return list;
+  }
+
   Future<List<Map<String, dynamic>>> _fetch() async {
     // 1. Get recent products from Supabase
-    final rows = await sb
+    final rows = await widget.sb
         .from('products')
         .select('''
           id,
@@ -2489,13 +2859,15 @@ class _SearchList extends StatelessWidget {
     // 2. Cast once
     final list = (rows as List).cast<Map<String, dynamic>>();
 
-    // 3. Local text filter
-    final q = queryText.trim().toLowerCase();
+    // 3. Local text filter: by NAME (description as extra)
+    final q = widget.queryText.trim().toLowerCase();
     final filtered = q.isEmpty
         ? list
         : list.where((p) {
       final name = (p['name'] ?? '').toString().toLowerCase();
-      return name.contains(q);
+      final desc = (p['description'] ?? '').toString().toLowerCase();
+      // primary: name.contains(q); desc is bonus
+      return name.contains(q) || desc.contains(q);
     }).toList();
 
     // 4. Normalize seller for safety
@@ -2516,7 +2888,8 @@ class _SearchList extends StatelessWidget {
     }
 
     // 5. Pull best discount for each product from product_events
-    final productIds = filtered.map((p) => p['id']).whereType<int>().toList();
+    final productIds =
+    filtered.map((p) => p['id']).whereType<int>().toList();
 
     final bestMap =
     await SupabaseService.fetchBestDiscountMapForProducts(productIds);
@@ -2537,19 +2910,156 @@ class _SearchList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _fetch(),
+      future: _future,
       builder: (_, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(
+              child: CircularProgressIndicator(color: kLucidPrimary));
         }
         if (snap.hasError) {
           return _SearchErrorState(error: snap.error.toString());
         }
-        final items = snap.data ?? const [];
-        if (items.isEmpty) {
+        final raw = snap.data ?? const [];
+        if (raw.isEmpty) {
           return const _SearchEmptyState(message: 'No products found');
         }
-        return _ProductGrid(products: items);
+
+        final items = _applyFilterAndSort(raw);
+
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 16),
+          children: [
+            const SizedBox(height: 8),
+
+            // 💜 Lucid Filter + Sort bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: kLucidSurface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: kLucidBorder),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: kLucidShadow,
+                      blurRadius: 12,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title row
+                    Row(
+                      children: const [
+                        Icon(
+                          Icons.filter_alt_rounded,
+                          size: 18,
+                          color: kLucidPrimary,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Filter & sort',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: kLucidText,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Category + Sort dropdowns
+                    Row(
+                      children: [
+                        // Category filter
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              isExpanded: true,
+                              value: _selectedCategory,
+                              icon: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: kLucidMuted,
+                                size: 20,
+                              ),
+                              items: const [
+                                'All',
+                                'Electronics',
+                                'Beauty',
+                                'Fashion',
+                                'Sport',
+                                'Food',
+                                'Other',
+                              ].map((cat) {
+                                return DropdownMenuItem<String>(
+                                  value: cat,
+                                  child: Text(
+                                    cat,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: kLucidText,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val == null) return;
+                                setState(() => _selectedCategory = val);
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+
+                        // Sort dropdown (rating + price)
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<_SearchSort>(
+                              isExpanded: true,
+                              value: _sort,
+                              icon: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: kLucidMuted,
+                                size: 20,
+                              ),
+                              items: _SearchSort.values.map((s) {
+                                return DropdownMenuItem<_SearchSort>(
+                                  value: s,
+                                  child: Text(
+                                    _sortLabel(s),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: kLucidText,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val == null) return;
+                                setState(() => _sort = val);
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // Product grid using your existing Lucid cards
+            _ProductGrid(products: items),
+          ],
+        );
       },
     );
   }
@@ -2566,7 +3076,7 @@ class _SearchEmptyState extends StatelessWidget {
         Center(
           child: Text(
             message,
-            style: TextStyle(color: Colors.grey.shade700),
+            style: TextStyle(color: kLucidMuted),
             textAlign: TextAlign.center,
           ),
         ),

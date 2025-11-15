@@ -18,10 +18,11 @@ import 'chat_room_screen.dart';
 import 'my_products_screen.dart';
 import '../features/profile/voucher_screen.dart';
 import 'connections_screen.dart';
-
-// 👇 to fetch best discounts for the viewer’s published products section
 import '../services/supabase_service.dart';
 import 'product_detail_screen.dart';
+
+// ✅ NEW: About screen import
+import 'about_muantok_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? userId;
@@ -370,7 +371,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: primaryPurple, // matches your theme
                   ),
 
-                  // ✅ NEW: Payment cards manager
+                  // Payment cards manager
                   _ActionTile(
                     title: 'Payment cards',
                     icon: Icons.credit_card,
@@ -396,6 +397,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     },
                     color: primaryPurple,
                   ),
+
+                  // ✅ NEW: About before Log Out
+                  _ActionTile(
+                    title: 'About Muan Tok',
+                    icon: Icons.info_outline,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const AboutMuanTokScreen(),
+                        ),
+                      );
+                    },
+                    color: primaryPurple,
+                  ),
+
                   _ActionTile(
                     title: 'Log Out',
                     icon: Icons.logout,
@@ -570,7 +587,7 @@ class _ViewerPublishedProductsSectionState extends State<ViewerPublishedProducts
         else if (_error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            child: Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+            child: Text('Error: _error', style: const TextStyle(color: Colors.red)),
           )
         else if (_items.isEmpty)
             const Padding(

@@ -36,7 +36,7 @@
     <application
         android:label="muantok"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/launcher_icon"
         android:hardwareAccelerated="true">
         <!-- If your LiveKit/Supabase endpoints are HTTP (not HTTPS) in dev, uncomment:
         android:usesCleartextTraffic="true" -->

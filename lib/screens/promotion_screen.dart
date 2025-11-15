@@ -5,12 +5,19 @@ import 'product_detail_screen.dart';
 
 /* ------------------------------ Lucid tokens ------------------------------ */
 const _kPurple = Color(0xFF7C3AED);
+const _kPurpleSoftA = Color(0xFFF3E8FF);
+const _kPurpleSoftB = Color(0xFFEDE9FE);
+const _kBg = Color(0xFFF5F3FF);
+const _kSurface = Colors.white;
+const _kText = Color(0xFF111827);
+const _kMuted = Color(0xFF6B7280);
+const _kBorder = Color(0xFFE5E7EB);
 const _kShadow = Color(0x14000000);
 
 /* ------------------------------- Screen ----------------------------------- */
 
 class PromotionScreen extends StatefulWidget {
-  final int eventId;      // which promo/event we're viewing
+  final int eventId; // which promo/event we're viewing
   final String eventName; // title to show in the app bar
 
   const PromotionScreen({
@@ -130,9 +137,11 @@ class _PromotionScreenState extends State<PromotionScreen> {
     searched.sort((a, b) {
       switch (_selectedSort) {
         case 'Price: Low → High':
-          return _asNum(a['effective_price']).compareTo(_asNum(b['effective_price']));
+          return _asNum(a['effective_price'])
+              .compareTo(_asNum(b['effective_price']));
         case 'Price: High → Low':
-          return _asNum(b['effective_price']).compareTo(_asNum(a['effective_price']));
+          return _asNum(b['effective_price'])
+              .compareTo(_asNum(a['effective_price']));
         case 'Rating: High → Low':
           return _ratingOf(b).compareTo(_ratingOf(a));
         case 'Rating: Low → High':
@@ -169,30 +178,66 @@ class _PromotionScreenState extends State<PromotionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: _kBg,
       appBar: AppBar(
+        elevation: 0,
+        backgroundColor: _kBg,
+        foregroundColor: _kText,
+        centerTitle: false,
+        titleSpacing: 0,
         leading: IconButton(
           onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded),
         ),
-        titleSpacing: 0,
-        elevation: 0.5,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
         title: Row(
           children: [
-            const Icon(Icons.local_fire_department, color: Colors.red),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                widget.eventName,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  colors: [_kPurple, Color(0xFFFB7185)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: _kPurple.withOpacity(0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.local_fire_department_rounded,
+                size: 20,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.eventName,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 18,
+                      color: _kText,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Limited Time Event',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _kMuted,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -200,80 +245,110 @@ class _PromotionScreenState extends State<PromotionScreen> {
       ),
       body: Column(
         children: [
-          // ---------- Filters / Search ----------
+          // ---------- Filters / Search card ----------
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // SEARCH BAR
-                Container(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: theme.dividerColor.withOpacity(.4),
-                    ),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Container(
+              decoration: BoxDecoration(
+                color: _kSurface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _kBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 18,
+                    offset: const Offset(0, 10),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.search, size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _searchCtrl,
-                          textInputAction: TextInputAction.search,
-                          decoration: const InputDecoration(
-                            border: InputBorder.none,
-                            hintText: 'Search in this promotion...',
+                ],
+              ),
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // SEARCH BAR
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: const LinearGradient(
+                        colors: [_kPurpleSoftA, _kPurpleSoftB],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.search_rounded,
+                          size: 20,
+                          color: _kPurple,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchCtrl,
+                            textInputAction: TextInputAction.search,
+                            cursorColor: _kPurple,
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              hintText: 'Search in this promotion...',
+                              hintStyle: TextStyle(
+                                fontSize: 13,
+                                color: _kMuted,
+                              ),
+                            ),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: _kText,
+                            ),
                           ),
                         ),
-                      ),
-                      if (_searchCtrl.text.isNotEmpty)
-                        GestureDetector(
-                          onTap: () => _searchCtrl.clear(),
-                          child: const Icon(Icons.close, size: 18),
+                        if (_searchCtrl.text.isNotEmpty)
+                          GestureDetector(
+                            onTap: () => _searchCtrl.clear(),
+                            child: const Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: _kMuted,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // CATEGORY + SORT
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _FilterDropdown<String>(
+                          label: 'Category',
+                          value: _selectedCategory,
+                          values: _categories,
+                          onChanged: (val) {
+                            if (val == null) return;
+                            setState(() => _selectedCategory = val);
+                            _applyFiltersLocally();
+                          },
                         ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _FilterDropdown<String>(
+                          label: 'Sort',
+                          value: _selectedSort,
+                          values: _sortOptions,
+                          onChanged: (val) {
+                            if (val == null) return;
+                            setState(() => _selectedSort = val);
+                            _applyFiltersLocally();
+                          },
+                        ),
+                      ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 12),
-
-                // CATEGORY + SORT
-                Row(
-                  children: [
-                    // CATEGORY DROPDOWN
-                    Expanded(
-                      child: _FilterDropdown<String>(
-                        label: 'Category',
-                        value: _selectedCategory,
-                        values: _categories,
-                        onChanged: (val) {
-                          if (val == null) return;
-                          setState(() => _selectedCategory = val);
-                          _applyFiltersLocally();
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-
-                    // SORT DROPDOWN (now includes rating)
-                    Expanded(
-                      child: _FilterDropdown<String>(
-                        label: 'Sort',
-                        value: _selectedSort,
-                        values: _sortOptions,
-                        onChanged: (val) {
-                          if (val == null) return;
-                          setState(() => _selectedSort = val);
-                          _applyFiltersLocally();
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
@@ -282,14 +357,18 @@ class _PromotionScreenState extends State<PromotionScreen> {
           // ---------- RESULT GRID / LOADING / ERROR ----------
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(
+              child: CircularProgressIndicator(color: _kPurple),
+            )
                 : _error != null
                 ? _ErrorRetry(message: _error!, onRetry: _fetch)
                 : _filteredItems.isEmpty
                 ? const _EmptyState()
                 : GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              padding:
+              const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              gridDelegate:
+              const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 mainAxisSpacing: 16,
                 crossAxisSpacing: 16,
@@ -325,13 +404,28 @@ class _FilterDropdown<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return InputDecorator(
       decoration: InputDecoration(
         labelText: label,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        labelStyle: const TextStyle(
+          fontSize: 12,
+          color: _kMuted,
+        ),
+        contentPadding:
+        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        filled: true,
+        fillColor: _kSurface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _kBorder),
+        ),
+        enabledBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(color: _kBorder),
+        ),
+        focusedBorder: const OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide(color: _kPurple, width: 1.3),
         ),
         isDense: true,
       ),
@@ -339,7 +433,7 @@ class _FilterDropdown<T> extends StatelessWidget {
         child: DropdownButton<T>(
           value: value,
           isExpanded: true,
-          icon: const Icon(Icons.arrow_drop_down),
+          icon: const Icon(Icons.arrow_drop_down_rounded, color: _kMuted),
           onChanged: onChanged,
           items: values
               .map(
@@ -347,7 +441,10 @@ class _FilterDropdown<T> extends StatelessWidget {
               value: v,
               child: Text(
                 v.toString(),
-                style: theme.textTheme.bodyMedium,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: _kText,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -364,11 +461,32 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'No products in this promotion.',
-        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-      ),
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: const [
+        Icon(
+          Icons.inbox_rounded,
+          size: 40,
+          color: _kMuted,
+        ),
+        SizedBox(height: 8),
+        Text(
+          'No products in this promotion',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: _kText,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          'Try another keyword or category.',
+          style: TextStyle(
+            fontSize: 12,
+            color: _kMuted,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -381,30 +499,51 @@ class _ErrorRetry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text(
-          'Error loading products',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: Colors.red,
-          ),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.red.shade200),
         ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Text(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.error_outline_rounded,
+              color: Colors.red, size: 24),
+          const SizedBox(height: 6),
+          const Text(
+            'Error loading products',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Colors.red,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12),
+            style: const TextStyle(fontSize: 12, color: _kMuted),
           ),
-        ),
-        const SizedBox(height: 12),
-        ElevatedButton(
-          onPressed: onRetry,
-          child: const Text('Retry'),
-        ),
-      ]),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kPurple,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text(
+              'Retry',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -433,7 +572,10 @@ class _EventProductCard extends StatelessWidget {
 
   List<String> _extractImageUrls(dynamic v) {
     if (v is List) {
-      return v.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+      return v
+          .map((e) => e?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
     } else if (v is String && v.isNotEmpty) {
       return [v];
     }
@@ -449,8 +591,6 @@ class _EventProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     final name = (product['name'] ?? '').toString();
     final category = (product['category'] ?? '').toString();
 
@@ -474,10 +614,9 @@ class _EventProductCard extends StatelessWidget {
     final firstImageUrl = urls.isNotEmpty ? urls.first : null;
 
     return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
+      color: Colors.transparent,
       child: InkWell(
+        borderRadius: BorderRadius.circular(14),
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute(
@@ -490,9 +629,16 @@ class _EventProductCard extends StatelessWidget {
         },
         child: Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: theme.dividerColor.withOpacity(.4)),
-            boxShadow: const [BoxShadow(color: _kShadow, blurRadius: 8, offset: Offset(0, 4))],
+            color: _kSurface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _kBorder),
+            boxShadow: const [
+              BoxShadow(
+                color: _kShadow,
+                blurRadius: 15,
+                offset: Offset(0, 8),
+              )
+            ],
           ),
           padding: const EdgeInsets.all(8),
           child: Column(
@@ -504,13 +650,17 @@ class _EventProductCard extends StatelessWidget {
                   children: [
                     Positioned.fill(
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: firstImageUrl != null && firstImageUrl.isNotEmpty
+                        borderRadius: BorderRadius.circular(10),
+                        child: firstImageUrl != null &&
+                            firstImageUrl.isNotEmpty
                             ? Image.network(firstImageUrl, fit: BoxFit.cover)
                             : Container(
-                          color: Colors.grey.shade300,
+                          color: _kPurpleSoftB,
                           child: const Center(
-                            child: Icon(Icons.image_not_supported),
+                            child: Icon(
+                              Icons.image_rounded,
+                              color: _kMuted,
+                            ),
                           ),
                         ),
                       ),
@@ -531,7 +681,7 @@ class _EventProductCard extends StatelessWidget {
                         right: 6,
                         child: _ChipBadge(
                           text: '-${pct.toString()}%',
-                          bg: Colors.red,
+                          bg: const Color(0xFFEF4444),
                           fg: Colors.white,
                         ),
                       ),
@@ -544,15 +694,24 @@ class _EventProductCard extends StatelessWidget {
               // Name
               Text(
                 name,
-                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: _kText,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
 
               const SizedBox(height: 4),
 
-              // ⭐ Rating row (purple) — NEW
-              _StarRating(rating: rating, size: 13, showNumber: true, color: _kPurple),
+              // ⭐ Rating row (purple)
+              _StarRating(
+                rating: rating,
+                size: 13,
+                showNumber: true,
+                color: _kPurple,
+              ),
 
               const SizedBox(height: 6),
 
@@ -562,27 +721,29 @@ class _EventProductCard extends StatelessWidget {
                 children: [
                   Text(
                     '฿ ${_fmtBaht(eff)}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    style: const TextStyle(
+                      fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: Colors.red,
+                      color: Color(0xFFDC2626),
                     ),
                   ),
                   const SizedBox(width: 6),
                   Text(
                     '฿ ${_fmtBaht(price)}',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      decoration: TextDecoration.lineThrough,
-                      color: theme.textTheme.bodySmall?.color?.withOpacity(.6),
+                    style: const TextStyle(
                       fontSize: 11,
+                      decoration: TextDecoration.lineThrough,
+                      color: _kMuted,
                     ),
                   ),
                 ],
               )
                   : Text(
                 '฿ ${_fmtBaht(price)}',
-                style: theme.textTheme.bodyMedium?.copyWith(
+                style: const TextStyle(
+                  fontSize: 14,
                   fontWeight: FontWeight.w700,
-                  color: Colors.red,
+                  color: Color(0xFFDC2626),
                 ),
               ),
 
@@ -592,18 +753,18 @@ class _EventProductCard extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.storefront_rounded,
                     size: 14,
-                    color: theme.textTheme.bodySmall?.color?.withOpacity(.7),
+                    color: _kMuted,
                   ),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       sellerName,
-                      style: theme.textTheme.bodySmall?.copyWith(
+                      style: const TextStyle(
                         fontSize: 11,
-                        color: theme.textTheme.bodySmall?.color?.withOpacity(.8),
+                        color: _kMuted,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -621,10 +782,10 @@ class _EventProductCard extends StatelessWidget {
 /* ------------------------------ Star rating ------------------------------- */
 
 class _StarRating extends StatelessWidget {
-  final double rating;        // 0..5
-  final double size;          // icon size
-  final bool showNumber;      // show numeric score
-  final Color color;          // star color
+  final double rating; // 0..5
+  final double size; // icon size
+  final bool showNumber; // show numeric score
+  final Color color; // star color
 
   const _StarRating({
     super.key,
@@ -641,7 +802,9 @@ class _StarRating extends StatelessWidget {
     for (int i = 1; i <= 5; i++) {
       final icon = r >= i
           ? Icons.star_rounded
-          : (r >= i - 0.5 ? Icons.star_half_rounded : Icons.star_border_rounded);
+          : (r >= i - 0.5
+          ? Icons.star_half_rounded
+          : Icons.star_border_rounded);
       stars.add(Icon(icon, size: size, color: color));
     }
 
@@ -657,6 +820,7 @@ class _StarRating extends StatelessWidget {
               fontSize: size - 1,
               fontWeight: FontWeight.w700,
               height: 1,
+              color: _kText,
             ),
           ),
         ],
@@ -680,10 +844,11 @@ class _ChipBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding:
+      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         text,
