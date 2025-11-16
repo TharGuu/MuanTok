@@ -196,7 +196,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openSearch(context),
                         child: const Icon(
                           Icons.search,
-                          color: kLucidPrimaryLite, // 💜 #D8BEE5
+                          color: kLucidPrimary, // 💜 #D8BEE5
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -210,7 +210,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         onTap: () => _openFavourites(context),
                         child: const Icon(
                           Icons.favorite_border_rounded,
-                          color: kLucidPrimaryLite, // 💜 #D8BEE5
+                          color: kLucidPrimary, // 💜 #D8BEE5
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
@@ -224,7 +224,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         tooltip: 'My Cart',
                         icon: const Icon(
                           Icons.shopping_cart_outlined,
-                          color: kLucidPrimaryLite, // 💜 #D8BEE5
+                          color: kLucidPrimary, // 💜 #D8BEE5
                           size: 28,
                           shadows: [Shadow(blurRadius: 2)],
                         ),
